@@ -44,6 +44,11 @@ ENV NODE_ENV=production \
     DATABASE_URL=file:/app/data/app.db
 WORKDIR /app
 
+# Prisma's schema engine (used by `prisma migrate deploy` at start-up) needs OpenSSL, which the slim image lacks
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends openssl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
 # Next.js standalone server + static assets
 COPY --from=build --chown=node:node /app/.next/standalone ./
 COPY --from=build --chown=node:node /app/.next/static ./.next/static
