@@ -1,0 +1,40 @@
+// Saved router configurations for the packet-flow simulator.
+// Docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+/// A person who logged in with Discord
+model User {
+  /// Discord user id
+  id        String        @id
+  username  String
+  avatar    String?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  configs   SavedConfig[]
+}
+
+model SavedConfig {
+  id          String   @id @default(cuid())
+  ownerId     String
+  owner       User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  /// router identity, shown in the list without loading the whole config
+  identity    String
+  /// RouterConfig as JSON
+  config      String
+  /// the test packet (PacketInput) as JSON
+  packet      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([ownerId, updatedAt])
+}

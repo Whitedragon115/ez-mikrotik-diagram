@@ -1,0 +1,696 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RouterOS Packet Flow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f5f6f8; --panel:#ffffff; --ink:#1a1e24; --muted:#5d6672; --line:#8d96a3; --rule:#e2e6eb;
+  --accent:#e8590c; --accent-soft:#fff0e6;
+  --sw:#3d4652;
+  --l2:#3b6fd6; --l2-tint:#eef3ff; --l2-fill:#dbe6ff;
+  --mpls:#c47d0e; --mpls-tint:#fff7e8; --mpls-fill:#ffe9c2;
+  --l3:#14906c; --l3-tint:#eaf7f2; --l3-fill:#cdeee2;
+  --loc:#6b7686; --loc-tint:#f0f2f5; --loc-fill:#e1e5ea;
+  --in:#2b9a46; --out:#d9363e; --logic:#7a4fe0;
+  --t-raw:#ef8a00; --t-ct:#7c8794; --t-mangle:#a83fc4; --t-nat:#1b74d1; --t-filter:#d9363e;
+  --t-queue:#2b9a46; --t-hs:#d6336c; --t-acct:#4b545e; --t-cond:#a3acb7;
+  --node:#ffffff; --shadow:0 1px 2px rgba(16,24,40,.06),0 4px 16px rgba(16,24,40,.06);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1116; --panel:#161b22; --ink:#e6e9ee; --muted:#9aa4b2; --line:#5f6a79; --rule:#262d37;
+    --accent:#ff8a3d; --accent-soft:#3a2416;
+    --sw:#c3cad4;
+    --l2:#7aa2ff; --l2-tint:#141c2d; --l2-fill:#1e2b47;
+    --mpls:#f0b04a; --mpls-tint:#231c10; --mpls-fill:#3a2d14;
+    --l3:#3fd1a2; --l3-tint:#10211c; --l3-fill:#173a30;
+    --loc:#9aa6b6; --loc-tint:#181c22; --loc-fill:#252b34;
+    --in:#4fd16f; --out:#ff6b72; --logic:#a688ff;
+    --node:#161b22; --shadow:0 1px 2px rgba(0,0,0,.4),0 4px 16px rgba(0,0,0,.3);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1116; --panel:#161b22; --ink:#e6e9ee; --muted:#9aa4b2; --line:#5f6a79; --rule:#262d37;
+  --accent:#ff8a3d; --accent-soft:#3a2416;
+  --sw:#c3cad4;
+  --l2:#7aa2ff; --l2-tint:#141c2d; --l2-fill:#1e2b47;
+  --mpls:#f0b04a; --mpls-tint:#231c10; --mpls-fill:#3a2d14;
+  --l3:#3fd1a2; --l3-tint:#10211c; --l3-fill:#173a30;
+  --loc:#9aa6b6; --loc-tint:#181c22; --loc-fill:#252b34;
+  --in:#4fd16f; --out:#ff6b72; --logic:#a688ff;
+  --node:#161b22; --shadow:0 1px 2px rgba(0,0,0,.4),0 4px 16px rgba(0,0,0,.3);
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.5 Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+code,.mono{font-family:"JetBrains Mono",ui-monospace,Consolas,monospace;font-size:12px}
+.wrap{max-width:1880px;margin:0 auto;padding:0 24px}
+header{padding:28px 0 12px;display:flex;gap:16px;align-items:flex-end;justify-content:space-between;flex-wrap:wrap}
+h1{font-size:26px;letter-spacing:-.02em;margin:0 0 4px}
+.sub{color:var(--muted);margin:0;max-width:760px}
+.btn{appearance:none;border:1px solid var(--rule);background:var(--panel);color:var(--ink);border-radius:8px;padding:6px 11px;font:inherit;font-size:13px;cursor:pointer;line-height:1.2}
+.btn:hover{border-color:var(--line)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn:disabled{opacity:.4;cursor:default}
+
+/* scenario picker */
+.scen{display:flex;flex-wrap:wrap;gap:14px 22px;padding:14px 16px;background:var(--panel);border:1px solid var(--rule);border-radius:12px;box-shadow:var(--shadow)}
+.sgroup{display:flex;flex-direction:column;gap:6px}
+.sgroup h4{margin:0;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--rule);background:var(--bg);color:var(--ink);border-radius:999px;padding:5px 11px;font:inherit;font-size:12.5px;cursor:pointer}
+.chip:hover{border-color:var(--accent)}
+.chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+
+/* diagram */
+.stage{margin-top:14px;background:var(--panel);border:1px solid var(--rule);border-radius:12px;box-shadow:var(--shadow);overflow:hidden}
+.stagebar{display:flex;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--rule);flex-wrap:wrap}
+.stagebar .sp{flex:1}
+.stagebar .lbl{color:var(--muted);font-size:12px;min-width:42px;text-align:center}
+.player{display:flex;gap:6px;align-items:center}
+.player .now{font-size:12.5px;color:var(--muted);margin-left:4px;max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.svgwrap{overflow:auto;cursor:grab;max-height:78vh}
+.svgwrap.dragging{cursor:grabbing}
+svg#flow{display:block;user-select:none}
+svg text{font-family:Inter,system-ui,sans-serif;fill:var(--ink)}
+.layer rect{stroke-dasharray:5 4;stroke-width:1.2}
+.layer text{font-size:11px;font-weight:700;letter-spacing:.09em}
+.edge path{fill:none;stroke:var(--line);stroke-width:1.6;transition:opacity .2s,stroke .2s}
+.edge text{font-size:9.5px;font-weight:700;fill:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.edge.jump path{stroke-dasharray:4 4}
+.node{cursor:pointer;transition:opacity .2s}
+.node .shape{fill:var(--node);stroke:var(--c);stroke-width:1.5;transition:stroke-width .15s}
+.node.chain .shape{fill:var(--cf)}
+.node.chain .bar{stroke:var(--c);stroke-width:1.5}
+.node.decision .shape{stroke:var(--sw)}
+.node.portal .shape{stroke-dasharray:3 3;fill:var(--bg)}
+.node.pill .shape{fill:var(--c);stroke:none}
+.node.pill text{fill:#fff}
+.node text{font-size:11px;font-weight:600;pointer-events:none}
+.node text.s{font-size:9px;font-weight:500;fill:var(--muted)}
+.node.pill text.s{fill:#fff;opacity:.85}
+.node.chain text{font-weight:700}
+.node:hover .shape{stroke-width:2.6}
+.node.sel .shape{stroke:var(--accent);stroke-width:2.6}
+.tracing .edge:not(.on){opacity:.14}
+.tracing .node:not(.on){opacity:.25}
+.tracing .layer{opacity:.55}
+.edge.on path{stroke:var(--accent);stroke-width:2.6}
+.edge.on text{fill:var(--accent)}
+.node.cur .shape{stroke:var(--accent);stroke-width:3.4}
+.badge circle{fill:var(--accent)}
+.badge text{fill:#fff;font-size:9px;font-weight:700}
+.dot-halo{fill:var(--accent);opacity:.25}
+.dot{fill:var(--accent);stroke:#fff;stroke-width:2}
+
+/* lower panels */
+.cols{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:14px;margin-top:14px}
+@media (max-width:980px){.cols{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--rule);border-radius:12px;box-shadow:var(--shadow);padding:16px 18px;min-width:0}
+.card h2{font-size:15px;margin:0 0 2px}
+.card .hint{color:var(--muted);font-size:13px;margin:0 0 12px}
+ol.steps{list-style:none;margin:0;padding:0;max-height:560px;overflow:auto;position:relative}
+ol.steps li{display:grid;grid-template-columns:30px 1fr;gap:10px;padding:8px 8px;border-radius:8px;cursor:pointer;border:1px solid transparent}
+ol.steps li:hover{background:var(--bg)}
+ol.steps li.cur{background:var(--accent-soft);border-color:var(--accent)}
+.num{width:24px;height:24px;border-radius:50%;background:var(--bg);border:1px solid var(--rule);display:grid;place-items:center;font-size:11px;font-weight:700;color:var(--muted)}
+li.cur .num{background:var(--accent);border-color:var(--accent);color:#fff}
+.st-title{font-weight:600;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.tag{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:1px 7px;border-radius:999px;border:1px solid currentColor;opacity:.9}
+.ans{font-size:11px;font-weight:700;padding:1px 8px;border-radius:999px;background:var(--ink);color:var(--panel)}
+.ans.no{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.st-desc{color:var(--muted);font-size:12.5px;margin-top:2px}
+.stages{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;align-items:center}
+.stg{font-size:11px;padding:2px 8px;border-radius:6px;background:var(--bg);border-left:3px solid var(--tc);white-space:nowrap}
+.stg.cond{border-left-style:dashed;color:var(--muted)}
+.arrow{color:var(--line);font-size:11px}
+.empty{color:var(--muted);font-size:13px;padding:22px 4px;text-align:center}
+
+.det-title{font-size:18px;font-weight:700;margin:0 0 6px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.det p{margin:0 0 10px}
+.menu{display:inline-block;background:var(--bg);border:1px solid var(--rule);border-radius:6px;padding:2px 8px;margin:2px 0 10px}
+.stage-list{list-style:none;padding:0;margin:8px 0 0;display:flex;flex-direction:column;gap:6px}
+.stage-list li{border-left:4px solid var(--tc);background:var(--bg);border-radius:6px;padding:7px 10px}
+.stage-list li.cond{border-left-style:dashed}
+.stage-list b{font-size:13px}
+.stage-list .d{color:var(--muted);font-size:12.5px}
+.stage-list code{color:var(--muted)}
+
+/* chains reference */
+section.ref{margin-top:14px}
+.chainrow{display:grid;grid-template-columns:130px 1fr;gap:12px;align-items:center;padding:10px 0;border-top:1px solid var(--rule)}
+.chainrow:first-of-type{border-top:0}
+.chainname{font-weight:700;border:2px solid var(--ink);border-left-width:6px;border-right-width:6px;padding:6px 10px;border-radius:4px;text-align:center;font-size:13px;cursor:pointer}
+.chainname:hover{border-color:var(--accent)}
+.flowline{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.flowline .stg{font-size:12px;padding:5px 10px}
+.legend{display:flex;flex-wrap:wrap;gap:10px 20px;margin-top:12px;font-size:12.5px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:12px;height:12px;border-radius:3px;background:var(--tc);display:inline-block}
+.shapes{display:flex;flex-wrap:wrap;gap:16px 26px;margin-top:4px}
+.shapes div{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted)}
+footer{color:var(--muted);font-size:12px;padding:22px 0 40px}
+@media (max-width:640px){
+  .wrap{padding:0 16px}
+  h1{font-size:21px}
+  .chainrow{grid-template-columns:1fr}
+  .player .now{display:none}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>RouterOS Packet Flow</h1>
+      <p class="sub">Every hook a packet can pass through in RouterOS — bridging (L2), MPLS, routing (L3) and the router itself — in one diagram. Pick a scenario to trace its exact path, or click any block for details.</p>
+    </div>
+    <button class="btn" id="themeBtn" title="Toggle theme">◐ Theme</button>
+  </header>
+
+  <div class="scen" id="scen"></div>
+
+  <div class="stage">
+    <div class="stagebar">
+      <div class="player">
+        <button class="btn" id="bFirst" title="Restart">⏮</button>
+        <button class="btn" id="bPrev" title="Previous step">◀</button>
+        <button class="btn primary" id="bPlay" title="Play / pause">▶ Play</button>
+        <button class="btn" id="bNext" title="Next step">▶▶</button>
+        <span class="now" id="now">Choose a scenario above</span>
+      </div>
+      <span class="sp"></span>
+      <button class="btn" id="bClear">Clear</button>
+      <button class="btn" id="zOut" title="Zoom out">−</button>
+      <span class="lbl" id="zLbl">100%</span>
+      <button class="btn" id="zIn" title="Zoom in">+</button>
+      <button class="btn" id="zFit">Fit</button>
+    </div>
+    <div class="svgwrap" id="svgwrap"><svg id="flow" xmlns="http://www.w3.org/2000/svg"></svg></div>
+  </div>
+
+  <div class="cols">
+    <div class="card">
+      <h2 id="wTitle">Walkthrough</h2>
+      <p class="hint" id="wHint">Select a scenario to list every step in order, with each firewall chain expanded into its stages.</p>
+      <ol class="steps" id="steps"></ol>
+    </div>
+    <div class="card det" id="det">
+      <h2>Details</h2>
+      <p class="hint">Click any block in the diagram (or a step) to see what happens there and where it's configured.</p>
+    </div>
+  </div>
+
+  <section class="ref card">
+    <h2>Chains, expanded</h2>
+    <p class="hint">The double-barred blocks in the diagram are shorthand for these sequences. Dashed stages only apply in some cases.</p>
+    <div id="chains"></div>
+    <div class="legend" id="tlegend"></div>
+  </section>
+
+  <section class="ref card">
+    <h2>Legend</h2>
+    <div class="shapes" id="shapes"></div>
+  </section>
+
+  <footer>Based on the MikroTik RouterOS packet-flow diagrams. Hooks like HotSpot, IPsec, MPLS and queues only take effect when they're configured.</footer>
+</div>
+
+<script>
+/* ---------------- data ---------------- */
+const VBW = 1820, VBH = 905;
+
+const CHAINS = {
+  prerouting:[
+    ['Hotspot-in','hs','/ip hotspot','Unauthenticated HotSpot clients are captured here (only when HotSpot is enabled).'],
+    ['Raw prerouting','raw','/ip firewall raw chain=prerouting','Stateless, cheap filtering before conntrack: drop floods early, or mark traffic as notrack.'],
+    ['Connection tracking','ct','/ip firewall connection tracking','Packet is matched to a connection and gets its state: new, established, related or invalid.'],
+    ['Mangle prerouting','mangle','/ip firewall mangle chain=prerouting','Mark connections, packets or routing; change DSCP, TTL or MSS before the routing decision.'],
+    ['DST-NAT','nat','/ip firewall nat chain=dstnat','Destination NAT: port forwarding, redirects. Changes where the packet will be routed.']
+  ],
+  input:[
+    ['Mangle input','mangle','/ip firewall mangle chain=input','Marking for traffic addressed to the router itself.'],
+    ['Filter input','filter','/ip firewall filter chain=input','Protects the router: allow management/services and drop the rest.'],
+    ['HTB global (queue tree)','queue','/queue tree parent=global','Global queue tree shaping for traffic going to the router.'],
+    ['Simple queues','queue','/queue simple','Simple queues for traffic going to the router.']
+  ],
+  forward:[
+    ['Bridge decision','cond','','Only for bridged traffic with use-ip-firewall=yes.'],
+    ['TTL = TTL − 1','ttl','','Routed packets have their TTL decremented. A packet that reaches 0 is dropped.'],
+    ['Mangle forward','mangle','/ip firewall mangle chain=forward','Marking for traffic passing through the router (e.g. MSS clamping).'],
+    ['Filter forward','filter','/ip firewall filter chain=forward','Protects clients and networks behind the router: the main through-traffic firewall.'],
+    ['Accounting','acct','/ip accounting','IP accounting counters (RouterOS v6).']
+  ],
+  output:[
+    ['Bridge decision','cond','','Only when the output goes out through a bridge.'],
+    ['Raw output','raw','/ip firewall raw chain=output','Stateless filtering or notrack for router-generated traffic.'],
+    ['Connection tracking','ct','/ip firewall connection tracking','Router-generated packets are tracked too.'],
+    ['Mangle output','mangle','/ip firewall mangle chain=output','Mark router-generated traffic, e.g. to policy-route it.'],
+    ['Filter output','filter','/ip firewall filter chain=output','Control what the router itself may send.'],
+    ['Routing adjustment','cond','','If mangle changed the routing mark or the packet, it is routed again.']
+  ],
+  postrouting:[
+    ['Mangle postrouting','mangle','/ip firewall mangle chain=postrouting','Last chance to mark or change packets, e.g. set DSCP or priority for queues.'],
+    ['SRC-NAT','nat','/ip firewall nat chain=srcnat','Source NAT: masquerade or src-nat to the public address.'],
+    ['Hotspot-out','hs','/ip hotspot','HotSpot outbound processing.'],
+    ['HTB global (queue tree)','queue','/queue tree parent=global','Global queue tree shaping.'],
+    ['Simple queues','queue','/queue simple','Simple queues (per-target bandwidth limits).']
+  ]
+};
+const TABLES = {raw:['Raw','--t-raw'],ct:['Conn. tracking','--t-ct'],mangle:['Mangle','--t-mangle'],nat:['NAT','--t-nat'],filter:['Filter','--t-filter'],queue:['Queues','--t-queue'],hs:['HotSpot','--t-hs'],acct:['Accounting','--t-acct'],ttl:['TTL','--t-acct'],cond:['Conditional','--t-cond']};
+
+const LAYERS = {
+  if:{name:'Interface',c:'--in'}, sw:{name:'Dispatch',c:'--sw'}, l2:{name:'Bridging',c:'--l2',f:'--l2-fill'},
+  mpls:{name:'MPLS',c:'--mpls',f:'--mpls-fill'}, l3:{name:'Routing',c:'--l3',f:'--l3-fill'}, loc:{name:'Router',c:'--loc',f:'--loc-fill'}
+};
+
+const IPFW = 'Bridge setting use-ip-firewall. When it is on, bridged IP traffic also passes through the IP firewall chains (Prerouting, Forward, Postrouting).';
+const CHAIN_DESC = c => 'Firewall chain. Expands to ' + CHAINS[c].map(s=>s[0]).join(' → ') + '.';
+
+// s: shape, L: layer, t: label, sub: sub-label, c: color override, d: description, m: menu path, chain: chain id
+const NODES = [
+  {id:'in_phys',s:'pill',x:95,y:95,w:120,h:38,L:'if',c:'--in',t:'Physical\nin-interface',d:'A frame arrives on a physical port (Ethernet, SFP, wireless…). Most packets start here.'},
+  {id:'in_log',s:'pill',x:250,y:30,w:150,h:30,L:'if',c:'--logic',t:'Logical in-interface',d:'After decapsulation, the inner packet comes back in as if it arrived on the logical interface (VLAN, EoIP, GRE, IPIP, VPLS…). It can then be bridged, routed and filtered again.'},
+  {id:'q_inbr',s:'decision',x:250,y:95,w:130,h:54,L:'sw',t:'In-iface\nbridge port?',d:'Is the receiving interface a bridge port? Yes: L2 bridge processing comes first. No: bridging is skipped.',m:'/interface bridge port'},
+  {id:'q_mpls_in',s:'decision',x:720,y:95,w:110,h:54,L:'sw',t:'MPLS\ntraffic?',d:'Does the frame carry an MPLS label? Yes: MPLS processing. No: go on to the IP check.'},
+  {id:'q_ip_in',s:'decision',x:1115,y:95,w:110,h:54,L:'sw',t:'IPv4 /\nIPv6?',d:'Is it an IP packet? Yes: the routing layer. No (for example a VLAN-tagged frame on a non-bridge port): go to the decapsulation check.'},
+  {id:'q_decap',s:'decision',x:1485,y:95,w:120,h:54,L:'sw',t:'Decapsulate?',d:'Does this router terminate the tunnel or VLAN (EoIP, GRE, IPIP, VLAN, VXLAN…)? Yes: strip the outer header. No: deliver to the router\'s own processes.'},
+  {id:'decapsulation',s:'box',x:1485,y:30,w:150,h:30,L:'sw',t:'Decapsulation',sub:'VLAN · tunnel · VPLS · TE',d:'The outer header is removed. The inner packet or frame comes back in on the logical in-interface.'},
+
+  {id:'br_dstnat',s:'box',x:250,y:240,w:100,h:36,L:'l2',t:'Bridge\nDST-NAT',d:'Bridge NAT, dstnat chain. Can rewrite the destination MAC or apply L2 actions before the bridging decision.',m:'/interface bridge nat chain=dstnat'},
+  {id:'br_ipfw1',s:'decision',x:380,y:240,w:110,h:50,L:'sw',t:'use-ip-\nfirewall?',d:IPFW,m:'/interface bridge settings use-ip-firewall'},
+  {id:'br_pre',s:'chain',chain:'prerouting',x:380,y:170,w:110,h:36,L:'l2',t:'PREROUTING',d:CHAIN_DESC('prerouting')},
+  {id:'br_decision',s:'para',x:530,y:240,w:112,h:40,L:'l2',t:'Bridging\ndecision',d:'The bridge looks up the destination MAC in its host table. Frames for the bridge itself go to Bridge input. All others are forwarded, or flooded when the MAC is unknown.',m:'/interface bridge host'},
+  {id:'br_input',s:'box',x:650,y:240,w:80,h:36,L:'l2',t:'Bridge\ninput',d:'Bridge filter, input chain. Frames addressed to the bridge interface itself, which go on to be routed or reach the router.',m:'/interface bridge filter chain=input'},
+  {id:'br_forward',s:'box',x:530,y:350,w:110,h:36,L:'l2',t:'Bridge\nforward',d:'Bridge filter, forward chain. Frames switched between bridge ports. Broadcast or unknown-unicast frames can be flooded to several ports.',m:'/interface bridge filter chain=forward'},
+  {id:'br_ipfw2',s:'decision',x:530,y:440,w:100,h:50,L:'sw',t:'use-ip-\nfirewall?',d:IPFW,m:'/interface bridge settings use-ip-firewall'},
+  {id:'br_fwd',s:'chain',chain:'forward',x:650,y:440,w:84,h:36,L:'l2',t:'FORWARD',d:CHAIN_DESC('forward')},
+  {id:'br_srcnat',s:'box',x:530,y:560,w:110,h:36,L:'l2',t:'Bridge\nSRC-NAT',d:'Bridge NAT, srcnat chain. The last bridge-level hook before the frame leaves a bridge port.',m:'/interface bridge nat chain=srcnat'},
+  {id:'br_ipfw3',s:'decision',x:380,y:560,w:110,h:50,L:'sw',t:'use-ip-\nfirewall?',d:IPFW,m:'/interface bridge settings use-ip-firewall'},
+  {id:'br_post',s:'chain',chain:'postrouting',x:380,y:650,w:110,h:36,L:'l2',t:'POSTROUTING',d:CHAIN_DESC('postrouting')},
+  {id:'br_output',s:'box',x:510,y:660,w:100,h:36,L:'l2',t:'Bridge\noutput',d:'Bridge filter, output chain. Frames that the router generated or routed into the bridge, on their way out of a bridge port.',m:'/interface bridge filter chain=output'},
+  {id:'br_decision_out',s:'para',x:640,y:660,w:100,h:40,L:'l2',t:'Bridging\ndecision',d:'The out-interface is a bridge, so the bridge picks the actual port from its MAC host table (or floods).'},
+
+  {id:'dec_in',s:'para',x:800,y:220,w:100,h:40,L:'mpls',t:'MPLS\ndecision',d:'Looks up the incoming label in the MPLS forwarding table. The label is either swapped (switched) or popped (this router is the egress).',m:'/mpls forwarding-table'},
+  {id:'pop',s:'box',x:930,y:220,w:100,h:40,L:'mpls',t:'Pop label',sub:'MPLS input',d:'The label is removed and the payload goes on as IP, or as VPLS/TE tunnel traffic.'},
+  {id:'vpls',s:'decision',x:930,y:300,w:100,h:50,L:'sw',t:'VPLS or\nTE tunnel?',d:'Was it a VPLS pseudowire or a TE tunnel? Yes: the payload is decapsulated onto the logical VPLS/TE interface. No: the inner IP packet goes to the IP check.'},
+  {id:'portal_decap',s:'portal',x:930,y:366,w:120,h:22,L:'mpls',t:'↗ to Decapsulation',d:'Continues at the Decapsulation step, top right.'},
+  {id:'switch',s:'box',x:800,y:420,w:100,h:40,L:'mpls',t:'Switch label',sub:'MPLS forward',d:'The label is swapped and the packet goes to the next hop with no IP processing at all (P-router behaviour).'},
+  {id:'dec_out',s:'para',x:1010,y:620,w:100,h:40,L:'mpls',t:'MPLS\ndecision',d:'The outgoing route has an MPLS binding, or the out-interface is VPLS/TE. Pick the label to impose.',m:'/mpls ldp · /mpls traffic-eng'},
+  {id:'push',s:'box',x:880,y:620,w:100,h:40,L:'mpls',t:'Push label',sub:'MPLS output',d:'A label is added before the packet goes to the out-interface.'},
+  {id:'portal_g',s:'portal',x:1010,y:700,w:132,h:22,L:'mpls',t:'from Encap (VPLS/TE)',d:'Traffic encapsulated into a VPLS or TE tunnel gets its MPLS label here.'},
+  {id:'q_mpls_out',s:'decision',x:1115,y:780,w:110,h:54,L:'sw',t:'MPLS\nlabel?',d:'Should the packet leave with an MPLS label (an LDP or TE binding to the next hop)? Yes: impose a label. No: continue.'},
+  {id:'q_outbr',s:'decision',x:715,y:780,w:110,h:54,L:'sw',t:'Out-iface\nbridge port?',d:'Is the out-interface a bridge? Yes: the bridge picks the port (bridge output path). No: continue.'},
+
+  {id:'r_pre',s:'chain',chain:'prerouting',x:1205,y:180,w:110,h:36,L:'l3',t:'PREROUTING',d:CHAIN_DESC('prerouting')},
+  {id:'r_decrypt',s:'box',x:1345,y:180,w:110,h:36,L:'l3',t:'IPsec\ndecryption',d:'The ESP/AH payload is decrypted, and the inner packet starts again at Prerouting as a new packet.',m:'/ip ipsec'},
+  {id:'ipsec_in',s:'decision',x:1485,y:180,w:110,h:50,L:'sw',t:'IPsec\npolicy?',d:'Does the packet match an IPsec policy (ESP/AH to this router)? Yes: decrypt it. No: continue.',m:'/ip ipsec policy'},
+  {id:'rd_in',s:'para',x:1300,y:265,w:120,h:40,L:'l3',t:'Routing\ndecision',d:'Route lookup on the destination, using routing marks and routing rules. If it is one of the router\'s own addresses it goes to Input, otherwise to Forward.',m:'/ip route · /routing rule'},
+  {id:'r_input',s:'chain',chain:'input',x:1485,y:265,w:110,h:36,L:'l3',t:'INPUT',d:CHAIN_DESC('input')},
+  {id:'r_forward',s:'chain',chain:'forward',x:1300,y:400,w:110,h:36,L:'l3',t:'FORWARD',d:CHAIN_DESC('forward')},
+  {id:'r_post',s:'chain',chain:'postrouting',x:1300,y:540,w:120,h:36,L:'l3',t:'POSTROUTING',d:CHAIN_DESC('postrouting')},
+  {id:'r_output',s:'chain',chain:'output',x:1470,y:540,w:110,h:36,L:'l3',t:'OUTPUT',d:CHAIN_DESC('output')},
+  {id:'rd_out',s:'para',x:1470,y:625,w:120,h:40,L:'l3',t:'Routing\ndecision',d:'Route lookup for packets the router generates or has just encrypted. Picks the out-interface and source address.',m:'/ip route · /routing rule'},
+  {id:'ipsec_out',s:'decision',x:1300,y:625,w:110,h:50,L:'sw',t:'IPsec\npolicy?',d:'Does the packet match an IPsec policy? Yes: encrypt it, and the new ESP packet is routed again through Output and Postrouting. No: continue to the out-interface.',m:'/ip ipsec policy'},
+  {id:'r_encrypt',s:'box',x:1300,y:705,w:110,h:34,L:'l3',t:'IPsec\nencryption',d:'The packet is encrypted and wrapped in a new ESP/AH header using the SA\'s addresses.',m:'/ip ipsec'},
+
+  {id:'local_in',s:'hex',x:1700,y:180,w:112,h:36,L:'loc',t:'LOCAL IN',d:'Handed to the router\'s own network stack.'},
+  {id:'proc',s:'box',x:1700,y:320,w:112,h:40,L:'loc',t:'Router\nprocesses',d:'Router services: Winbox/SSH, DNS, DHCP, BGP/OSPF, VPN servers, ping replies…'},
+  {id:'local_out',s:'hex',x:1700,y:460,w:112,h:36,L:'loc',t:'LOCAL OUT',d:'Packets the router generates (replies, pings, routing updates, encapsulated tunnel packets) start here.'},
+  {id:'q_ip_out',s:'decision',x:1600,y:780,w:110,h:54,L:'sw',t:'IPv4 /\nIPv6?',d:'Is this router-generated traffic IP? Yes: route it through Output. No (for example non-IP L2 traffic): go straight to the out-interface checks.'},
+
+  {id:'q_encap',s:'decision',x:250,y:780,w:130,h:54,L:'sw',t:'Encapsulate?',d:'Is the out-interface logical (VLAN, EoIP, GRE, IPIP, VPLS…)? Yes: interface queue, then encapsulate and come back in as router-generated traffic. No: transmit on the physical port.'},
+  {id:'htb1',s:'box',x:95,y:780,w:120,h:36,L:'if',c:'--sw',t:'Interface HTB',d:'Per-interface queues (queue tree with parent=<interface>, interface queue type). The last shaping point before the wire.',m:'/queue tree parent=<interface>'},
+  {id:'out_phys',s:'pill',x:95,y:868,w:130,h:38,L:'if',c:'--out',t:'Physical\nout-interface',d:'The frame is transmitted on the physical port.'},
+  {id:'htb2',s:'box',x:360,y:868,w:110,h:34,L:'if',c:'--sw',t:'Interface HTB',d:'Queue on the logical out-interface.',m:'/queue tree parent=<interface>'},
+  {id:'log_out',s:'pill',x:530,y:868,w:140,h:34,L:'if',c:'--logic',t:'Logical out-interface',d:'The packet is sent through a virtual interface, which passes it to encapsulation.'},
+  {id:'encapsulation',s:'box',x:720,y:868,w:140,h:34,L:'sw',t:'Encapsulation',sub:'VLAN · tunnel · VPLS · TE',d:'An outer header is added (VLAN tag, EoIP/GRE/IPIP header, VPLS/TE label). The result is processed again as router-generated traffic from Local Out, or by MPLS for VPLS/TE.'}
+];
+
+// [from, to, points, label]
+const EDGES = [
+  ['in_phys','q_inbr',[[155,95],[185,95]]],
+  ['in_log','q_inbr',[[250,45],[250,68]]],
+  ['q_inbr','br_dstnat',[[250,122],[250,222]],'yes'],
+  ['q_inbr','q_mpls_in',[[315,95],[665,95]],'no'],
+  ['br_dstnat','br_ipfw1',[[300,240],[325,240]]],
+  ['br_ipfw1','br_pre',[[380,215],[380,188]],'yes'],
+  ['br_ipfw1','br_decision',[[435,240],[478,240]],'no'],
+  ['br_pre','br_decision',[[435,170],[530,170],[530,220]]],
+  ['br_decision','br_input',[[582,240],[610,240]]],
+  ['br_input','q_mpls_in',[[650,222],[650,95],[665,95]]],
+  ['br_decision','br_forward',[[530,260],[530,332]]],
+  ['br_forward','br_ipfw2',[[530,368],[530,415]]],
+  ['br_ipfw2','br_fwd',[[580,440],[608,440]],'yes'],
+  ['br_ipfw2','br_srcnat',[[530,465],[530,542]],'no'],
+  ['br_fwd','br_srcnat',[[650,458],[650,560],[585,560]]],
+  ['q_outbr','br_decision_out',[[715,753],[715,660],[686,660]],'yes'],
+  ['br_decision_out','br_output',[[592,660],[560,660]]],
+  ['br_output','br_srcnat',[[510,642],[510,578]]],
+  ['br_srcnat','br_ipfw3',[[475,560],[435,560]]],
+  ['br_ipfw3','br_post',[[380,585],[380,632]],'yes'],
+  ['br_ipfw3','q_encap',[[325,560],[250,560],[250,753]],'no'],
+  ['br_post','q_encap',[[380,668],[380,712],[250,712],[250,753]]],
+  ['q_mpls_in','dec_in',[[720,122],[720,220],[752,220]],'yes'],
+  ['q_mpls_in','q_ip_in',[[775,95],[1060,95]],'no'],
+  ['dec_in','pop',[[848,220],[880,220]]],
+  ['pop','vpls',[[930,240],[930,275]]],
+  ['vpls','portal_decap',[[930,325],[930,355]],'yes'],
+  ['vpls','q_ip_in',[[980,300],[1030,300],[1030,95],[1060,95]],'no'],
+  ['dec_in','switch',[[800,240],[800,400]]],
+  ['switch','q_outbr',[[800,440],[800,780],[770,780]]],
+  ['q_mpls_out','dec_out',[[1115,753],[1115,620],[1058,620]],'yes'],
+  ['portal_g','dec_out',[[1010,689],[1010,640]]],
+  ['dec_out','push',[[962,620],[930,620]]],
+  ['push','q_outbr',[[830,620],[800,620],[800,780],[770,780]]],
+  ['q_mpls_out','q_outbr',[[1060,780],[770,780]],'no'],
+  ['q_outbr','q_encap',[[660,780],[315,780]],'no'],
+  ['q_ip_in','r_pre',[[1115,122],[1115,180],[1150,180]],'yes'],
+  ['q_ip_in','q_decap',[[1170,95],[1425,95]],'no'],
+  ['r_pre','rd_in',[[1205,198],[1205,265],[1243,265]]],
+  ['rd_in','r_input',[[1357,265],[1430,265]]],
+  ['rd_in','r_forward',[[1300,285],[1300,382]]],
+  ['r_input','ipsec_in',[[1485,247],[1485,205]]],
+  ['ipsec_in','r_decrypt',[[1430,180],[1400,180]],'yes'],
+  ['r_decrypt','r_pre',[[1290,180],[1260,180]]],
+  ['ipsec_in','q_decap',[[1485,155],[1485,122]],'no'],
+  ['q_decap','decapsulation',[[1485,68],[1485,45]],'yes'],
+  ['decapsulation','in_log',[[1410,30],[325,30]]],
+  ['q_decap','local_in',[[1545,95],[1700,95],[1700,162]],'no'],
+  ['local_in','proc',[[1700,198],[1700,300]]],
+  ['proc','local_out',[[1700,340],[1700,442]]],
+  ['local_out','q_ip_out',[[1700,478],[1700,780],[1655,780]]],
+  ['q_ip_out','rd_out',[[1600,753],[1600,625],[1527,625]],'yes'],
+  ['q_ip_out','q_mpls_out',[[1545,780],[1170,780]],'no'],
+  ['rd_out','r_output',[[1470,605],[1470,558]]],
+  ['r_output','r_post',[[1415,540],[1360,540]]],
+  ['r_forward','r_post',[[1300,418],[1300,522]]],
+  ['r_post','ipsec_out',[[1300,558],[1300,600]]],
+  ['ipsec_out','r_encrypt',[[1300,650],[1300,688]],'yes'],
+  ['r_encrypt','rd_out',[[1355,705],[1470,705],[1470,645]]],
+  ['ipsec_out','q_mpls_out',[[1245,625],[1190,625],[1190,780],[1170,780]],'no'],
+  ['q_encap','htb1',[[185,780],[155,780]],'no'],
+  ['htb1','out_phys',[[95,798],[95,849]]],
+  ['q_encap','htb2',[[250,807],[250,868],[305,868]],'yes'],
+  ['htb2','log_out',[[415,868],[460,868]]],
+  ['log_out','encapsulation',[[600,868],[650,868]]],
+  ['encapsulation','local_out',[[790,868],[1790,868],[1790,460],[1756,460]]]
+];
+
+const L_IN = ['in_phys','q_inbr','q_mpls_in','q_ip_in','r_pre','rd_in'];
+const L_OUT = ['q_mpls_out','q_outbr','q_encap','htb1','out_phys'];
+const SCENARIOS = [
+  {g:'Basics',id:'fwd',name:'Routed through the router',desc:'A LAN host browsing the Internet. The packet is routed through the router (Forward) and NATed on the way out.',
+   p:[...L_IN,'r_forward','r_post','ipsec_out',...L_OUT]},
+  {g:'Basics',id:'in',name:'To the router',desc:'Winbox, SSH, a DNS query or a ping addressed to the router itself (Input).',
+   p:[...L_IN,'r_input','ipsec_in','q_decap','local_in','proc']},
+  {g:'Basics',id:'out',name:'From the router',desc:'Traffic the router generates itself, such as a ping, an NTP or DNS request, or a BGP update (Output).',
+   p:['proc','local_out','q_ip_out','rd_out','r_output','r_post','ipsec_out',...L_OUT]},
+  {g:'Bridging',id:'br',name:'Bridged (switched)',desc:'Two hosts in the same bridge. Pure L2 forwarding with use-ip-firewall=no.',
+   p:['in_phys','q_inbr','br_dstnat','br_ipfw1','br_decision','br_forward','br_ipfw2','br_srcnat','br_ipfw3','q_encap','htb1','out_phys']},
+  {g:'Bridging',id:'bripfw',name:'Bridged + use-ip-firewall',desc:'Same as bridged, but with use-ip-firewall=yes the IP Prerouting, Forward and Postrouting chains also run.',
+   p:['in_phys','q_inbr','br_dstnat','br_ipfw1','br_pre','br_decision','br_forward','br_ipfw2','br_fwd','br_srcnat','br_ipfw3','br_post','q_encap','htb1','out_phys']},
+  {g:'Bridging',id:'brroute',name:'Routed between bridges',desc:'The packet enters on a bridge port, is routed by the router, and leaves through another bridge (for example inter-VLAN routing).',
+   p:['in_phys','q_inbr','br_dstnat','br_ipfw1','br_decision','br_input','q_mpls_in','q_ip_in','r_pre','rd_in','r_forward','r_post','ipsec_out','q_mpls_out','q_outbr','br_decision_out','br_output','br_srcnat','br_ipfw3','q_encap','htb1','out_phys']},
+  {g:'IPsec',id:'enc',name:'Encrypt (site-to-site out)',desc:'A LAN packet matches an IPsec policy. It is encrypted, then the ESP packet is routed again through Output and Postrouting.',
+   p:[...L_IN,'r_forward','r_post','ipsec_out','r_encrypt','rd_out','r_output','r_post','ipsec_out',...L_OUT]},
+  {g:'IPsec',id:'dec',name:'Decrypt (site-to-site in)',desc:'An ESP packet reaches the router (Input). It is decrypted, and the inner packet starts again at Prerouting before it is forwarded to the LAN.',
+   p:[...L_IN,'r_input','ipsec_in','r_decrypt','r_pre','rd_in','r_forward','r_post','ipsec_out',...L_OUT]},
+  {g:'Tunnels',id:'tunin',name:'Tunnel in (GRE/EoIP)',desc:'A GRE, IPIP or EoIP packet arrives for the router. It is decapsulated, and the inner packet comes back in on the tunnel interface and is forwarded.',
+   p:[...L_IN,'r_input','ipsec_in','q_decap','decapsulation','in_log',...L_IN.slice(1),'r_forward','r_post','ipsec_out',...L_OUT]},
+  {g:'Tunnels',id:'tunout',name:'Tunnel out (GRE/EoIP)',desc:'A packet is routed into a tunnel interface. It is queued and encapsulated, and the outer packet is sent as router-generated traffic.',
+   p:[...L_IN,'r_forward','r_post','ipsec_out','q_mpls_out','q_outbr','q_encap','htb2','log_out','encapsulation','local_out','q_ip_out','rd_out','r_output','r_post','ipsec_out',...L_OUT]},
+  {g:'Tunnels',id:'vlan',name:'VLAN on a plain port',desc:'A VLAN-tagged frame arrives on a non-bridge port that has a VLAN interface. It is untagged, then routed.',
+   p:['in_phys','q_inbr','q_mpls_in','q_ip_in','q_decap','decapsulation','in_log','q_inbr','q_mpls_in','q_ip_in','r_pre','rd_in','r_forward','r_post','ipsec_out',...L_OUT]},
+  {g:'MPLS',id:'lsr',name:'Label switch (P router)',desc:'A labelled packet is swapped and sent on with no IP processing.',
+   p:['in_phys','q_inbr','q_mpls_in','dec_in','switch','q_outbr','q_encap','htb1','out_phys']},
+  {g:'MPLS',id:'push',name:'Label push (ingress)',desc:'An IP packet is routed to a next hop that has a label binding, so a label is imposed.',
+   p:[...L_IN,'r_forward','r_post','ipsec_out','q_mpls_out','dec_out','push','q_outbr','q_encap','htb1','out_phys']},
+  {g:'MPLS',id:'pop',name:'Label pop (egress)',desc:'The router is the last hop of the LSP. The label is popped and the IP packet is routed normally.',
+   p:['in_phys','q_inbr','q_mpls_in','dec_in','pop','vpls','q_ip_in','r_pre','rd_in','r_forward','r_post','ipsec_out',...L_OUT]},
+  {g:'MPLS',id:'vplsin',name:'VPLS termination',desc:'A VPLS pseudowire packet is popped and decapsulated. The Ethernet frame comes back in on the VPLS interface, which is bridged to a LAN.',
+   p:['in_phys','q_inbr','q_mpls_in','dec_in','pop','vpls','portal_decap','decapsulation','in_log','q_inbr','br_dstnat','br_ipfw1','br_decision','br_forward','br_ipfw2','br_srcnat','br_ipfw3','q_encap','htb1','out_phys']}
+];
+
+/* ---------------- helpers ---------------- */
+const NS='http://www.w3.org/2000/svg';
+const $=s=>document.querySelector(s);
+const byId=Object.fromEntries(NODES.map(n=>[n.id,n]));
+const E=Object.fromEntries(EDGES.map(e=>[e[0]+'>'+e[1],e]));
+function el(tag,attrs,parent){const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(parent)parent.appendChild(e);return e}
+function h(tag,attrs={},html=''){const e=document.createElement(tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(html)e.innerHTML=html;return e}
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const plain=t=>t.replace(/\n/g,' ').replace(/- /g,'-');
+const nodeColor=n=>n.c||LAYERS[n.L].c;
+
+// sanity check scenarios
+SCENARIOS.forEach(s=>s.p.forEach((id,i)=>{if(!byId[id])console.warn('missing node',id);const nx=s.p[i+1];if(nx&&!E[id+'>'+nx]&&id!=='portal_decap')console.warn('missing edge',s.id,id,nx)}));
+
+/* ---------------- svg render ---------------- */
+const svg=$('#flow');
+svg.setAttribute('viewBox',`0 0 ${VBW} ${VBH}`);
+const defs=el('defs',{},svg);
+[['arr','var(--line)'],['arrOn','var(--accent)']].forEach(([id,c])=>{
+  const m=el('marker',{id,viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:7,markerHeight:7,orient:'auto-start-reverse'},defs);
+  el('path',{d:'M0,0 L10,5 L0,10 z',style:`fill:${c}`},m);
+});
+const gLayers=el('g',{},svg), gEdges=el('g',{},svg), gNodes=el('g',{},svg), gBadges=el('g',{},svg), gDot=el('g',{},svg);
+
+[[190,135,510,605,'L2 · BRIDGING','l2'],[745,135,335,605,'MPLS','mpls'],[1140,135,460,605,'L3 · ROUTING','l3'],[1636,135,128,385,'ROUTER','loc']]
+.forEach(([x,y,w,hh,t,k])=>{
+  const g=el('g',{class:'layer'},gLayers);
+  el('rect',{x,y,width:w,height:hh,rx:12,style:`fill:var(--${k}-tint);stroke:var(--${k})`},g);
+  const tx=el('text',{x:x+w-10,y:y+hh-10,'text-anchor':'end',style:`fill:var(--${k})`},g);tx.textContent=t;
+});
+
+const edgeEls={};
+EDGES.forEach(e=>{
+  const [f,t,pts,lab]=e;
+  const g=el('g',{class:'edge'},gEdges);
+  el('path',{d:'M'+pts.map(p=>p.join(',')).join(' L'),'marker-end':'url(#arr)'},g);
+  if(lab){
+    const [a,b]=pts, dx=Math.sign(b[0]-a[0]), dy=Math.sign(b[1]-a[1]);
+    let x,y,anchor='start';
+    if(dy){x=a[0]+6;y=a[1]+(dy>0?13:-5)}else{x=a[0]+(dx>0?5:-5);y=a[1]-5;anchor=dx>0?'start':'end'}
+    const tx=el('text',{x,y,'text-anchor':anchor},g);tx.textContent=lab;
+  }
+  edgeEls[f+'>'+t]=g;
+});
+
+function shapeOf(n,g){
+  const {x,y,w,h:hh}=n,l=x-w/2,r=x+w/2,t=y-hh/2,b=y+hh/2;
+  const st=`--c:var(${nodeColor(n)});--cf:var(${LAYERS[n.L].f||'--node'})`;
+  g.setAttribute('style',st);
+  let s;
+  switch(n.s){
+    case 'decision': s=el('polygon',{points:`${x},${t} ${r},${y} ${x},${b} ${l},${y}`},g);break;
+    case 'para':{const o=9;s=el('polygon',{points:`${l+o},${t} ${r},${t} ${r-o},${b} ${l},${b}`},g);break}
+    case 'hex':{const k=13;s=el('polygon',{points:`${l+k},${t} ${r-k},${t} ${r},${y} ${r-k},${b} ${l+k},${b} ${l},${y}`},g);break}
+    case 'pill': case 'portal': s=el('rect',{x:l,y:t,width:w,height:hh,rx:hh/2},g);break;
+    case 'chain':
+      s=el('rect',{x:l,y:t,width:w,height:hh,rx:3},g);
+      el('line',{class:'bar',x1:l+7,y1:t,x2:l+7,y2:b},g);el('line',{class:'bar',x1:r-7,y1:t,x2:r-7,y2:b},g);break;
+    default: s=el('rect',{x:l,y:t,width:w,height:hh,rx:6},g);
+  }
+  s.setAttribute('class','shape');
+}
+const nodeEls={};
+NODES.forEach(n=>{
+  const g=el('g',{class:'node '+n.s,'data-id':n.id,tabindex:0,role:'button','aria-label':plain(n.t)},gNodes);
+  shapeOf(n,g);
+  const lines=n.t.split('\n'), lh=12.5, subH=n.sub?11:0;
+  const total=lines.length*lh+subH, y0=n.y-total/2+lh-3;
+  lines.forEach((ln,i)=>{const t=el('text',{x:n.x,y:y0+i*lh,'text-anchor':'middle'},g);t.textContent=ln});
+  if(n.sub){const t=el('text',{class:'s',x:n.x,y:y0+lines.length*lh-1,'text-anchor':'middle'},g);t.textContent=n.sub}
+  const ti=el('title',{},g);ti.textContent=plain(n.t)+' — '+n.d;
+  nodeEls[n.id]=g;
+});
+const halo=el('circle',{class:'dot-halo',r:13,cx:-50,cy:-50},gDot), dot=el('circle',{class:'dot',r:6,cx:-50,cy:-50},gDot);
+gDot.style.display='none';
+
+/* ---------------- zoom & pan ---------------- */
+const wrap=$('#svgwrap');let zoom=1;
+function applyZoom(){svg.style.width=VBW*zoom+'px';svg.style.height=VBH*zoom+'px';$('#zLbl').textContent=Math.round(zoom*100)+'%'}
+function fit(){zoom=Math.max(.5,Math.min(1.4,(wrap.clientWidth-2)/VBW));applyZoom()}
+$('#zIn').onclick=()=>{zoom=Math.min(2.5,zoom*1.2);applyZoom()};
+$('#zOut').onclick=()=>{zoom=Math.max(.3,zoom/1.2);applyZoom()};
+$('#zFit').onclick=fit;
+let drag=null,moved=false;
+wrap.addEventListener('pointerdown',e=>{if(e.pointerType!=='mouse'||e.button!==0)return;drag={x:e.clientX,y:e.clientY,l:wrap.scrollLeft,t:wrap.scrollTop};moved=false});
+window.addEventListener('pointermove',e=>{if(!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(Math.abs(dx)+Math.abs(dy)>4){moved=true;wrap.classList.add('dragging')}wrap.scrollLeft=drag.l-dx;wrap.scrollTop=drag.t-dy});
+window.addEventListener('pointerup',()=>{drag=null;wrap.classList.remove('dragging')});
+
+/* ---------------- details panel ---------------- */
+const det=$('#det');
+function layerTag(n){const L=LAYERS[n.L];return `<span class="tag" style="color:var(${n.L==='if'?nodeColor(n):L.c})">${L.name}</span>`}
+function stageHTML(c){return CHAINS[c].map(s=>`<li class="${s[1]==='cond'?'cond':''}" style="--tc:var(${TABLES[s[1]][1]})"><b>${esc(s[0])}</b>${s[2]?` · <code>${esc(s[2])}</code>`:''}<div class="d">${esc(s[3])}</div></li>`).join('')}
+function showDetails(id){
+  const n=byId[id];
+  document.querySelectorAll('.node.sel').forEach(x=>x.classList.remove('sel'));
+  nodeEls[id].classList.add('sel');
+  det.innerHTML=`<h2>Details</h2><div class="det-title">${esc(plain(n.t))}${n.sub?` <span style="color:var(--muted);font-weight:500;font-size:14px">(${esc(n.sub)})</span>`:''} ${layerTag(n)}</div>
+   <p>${esc(n.d)}</p>${n.m?`<code class="menu">${esc(n.m)}</code>`:''}
+   ${n.chain?`<div style="font-weight:600;margin-top:4px">Stages in order</div><ol class="stage-list">${stageHTML(n.chain)}</ol>`:''}`;
+}
+function showChain(c){
+  det.innerHTML=`<h2>Details</h2><div class="det-title">${c.toUpperCase()} chain</div><p>${esc(CHAIN_DESC(c))}</p><ol class="stage-list">${stageHTML(c)}</ol>`;
+  det.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+Object.entries(nodeEls).forEach(([id,g])=>{
+  g.addEventListener('click',()=>{if(moved)return;
+    if(cur&&cur.p.includes(id)){const i=cur.p.indexOf(id);goStep(i>=0&&cur.p.indexOf(id,step+1)>step&&cur.p[step]===id?cur.p.indexOf(id,step+1):i);}
+    else showDetails(id)});
+  g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();showDetails(id)}});
+});
+
+/* ---------------- scenarios ---------------- */
+const scen=$('#scen');
+[...new Set(SCENARIOS.map(s=>s.g))].forEach(gname=>{
+  const g=h('div',{class:'sgroup'},`<h4>${gname}</h4>`), c=h('div',{class:'chips'});
+  SCENARIOS.filter(s=>s.g===gname).forEach(s=>{const b=h('button',{class:'chip','data-id':s.id});b.textContent=s.name;b.onclick=()=>setScenario(s.id);c.appendChild(b)});
+  g.appendChild(c);scen.appendChild(g);
+});
+
+let cur=null, step=0, route=null, dist=0, playing=false, raf=0, lastT=0;
+const SPEED=340; // svg units per second
+const stepsEl=$('#steps');
+
+function buildRoute(p){
+  const pts=[[byId[p[0]].x,byId[p[0]].y]], jumps=new Set(), at=[0];
+  for(let i=1;i<p.length;i++){
+    const e=E[p[i-1]+'>'+p[i]], n=byId[p[i]];
+    if(e){e[2].forEach(q=>pts.push(q))}else{jumps.add(pts.length)}
+    pts.push([n.x,n.y]);
+    at.push(pts.length-1);
+  }
+  const cum=[0];for(let i=1;i<pts.length;i++)cum.push(cum[i-1]+(jumps.has(i)?0:Math.hypot(pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1])));
+  return {pts,cum,stepD:at.map(i=>cum[i]),total:cum[cum.length-1],jumps};
+}
+function pointAt(d){
+  const {pts,cum}=route;
+  for(let i=1;i<pts.length;i++){if(cum[i]>=d){const seg=cum[i]-cum[i-1]||1,t=(d-cum[i-1])/seg;return [pts[i-1][0]+(pts[i][0]-pts[i-1][0])*t,pts[i-1][1]+(pts[i][1]-pts[i-1][1])*t]}}
+  return pts[pts.length-1];
+}
+function placeDot(){const [x,y]=pointAt(dist);dot.setAttribute('cx',x);dot.setAttribute('cy',y);halo.setAttribute('cx',x);halo.setAttribute('cy',y)}
+
+function setScenario(id){
+  stop();
+  cur=SCENARIOS.find(s=>s.id===id);
+  document.querySelectorAll('.chip').forEach(c=>c.classList.toggle('on',c.dataset.id===id));
+  svg.classList.add('tracing');
+  Object.values(nodeEls).forEach(g=>g.classList.remove('on','cur'));
+  Object.values(edgeEls).forEach(g=>{g.classList.remove('on');g.querySelector('path').setAttribute('marker-end','url(#arr)')});
+  gBadges.innerHTML='';
+  const nums={};
+  cur.p.forEach((nid,i)=>{nodeEls[nid].classList.add('on');(nums[nid]=nums[nid]||[]).push(i+1);
+    const e=edgeEls[nid+'>'+cur.p[i+1]];if(e){e.classList.add('on');e.querySelector('path').setAttribute('marker-end','url(#arrOn)')}});
+  Object.entries(nums).forEach(([nid,arr])=>{
+    const n=byId[nid],label=arr.join('·'),w=Math.max(18,label.length*6+8);
+    const bx=n.s==='decision'?n.x+n.w/4+4:n.x+n.w/2-4, by=n.s==='decision'?n.y-n.h/4-6:n.y-n.h/2;
+    const g=el('g',{class:'badge'},gBadges);
+    el('rect',{x:bx-w/2,y:by-9,width:w,height:18,rx:9,style:'fill:var(--accent)'},g);
+    const t=el('text',{x:bx,y:by+3.5,'text-anchor':'middle'},g);t.textContent=label;
+  });
+  route=buildRoute(cur.p);
+  renderSteps();
+  gDot.style.display='';
+  goStep(0);
+  $('#wTitle').textContent=cur.name;
+  $('#wHint').textContent=cur.desc+` (${cur.p.length} steps)`;
+}
+function clearScenario(){
+  stop();cur=null;route=null;svg.classList.remove('tracing');
+  document.querySelectorAll('.chip').forEach(c=>c.classList.remove('on'));
+  Object.values(nodeEls).forEach(g=>g.classList.remove('on','cur','sel'));
+  Object.values(edgeEls).forEach(g=>{g.classList.remove('on');g.querySelector('path').setAttribute('marker-end','url(#arr)')});
+  gBadges.innerHTML='';gDot.style.display='none';
+  stepsEl.innerHTML='';$('#wTitle').textContent='Walkthrough';
+  $('#wHint').textContent='Select a scenario to list every step in order, with each firewall chain expanded into its stages.';
+  $('#now').textContent='Choose a scenario above';
+}
+function renderSteps(){
+  stepsEl.innerHTML='';
+  cur.p.forEach((nid,i)=>{
+    const n=byId[nid], e=E[nid+'>'+cur.p[i+1]], ans=e&&e[3];
+    const li=h('li',{'data-i':i});
+    const stages=n.chain?`<div class="stages">${CHAINS[n.chain].map(s=>`<span class="stg ${s[1]==='cond'?'cond':''}" style="--tc:var(${TABLES[s[1]][1]})">${esc(s[0])}</span>`).join('<span class="arrow">→</span>')}</div>`:'';
+    li.innerHTML=`<span class="num">${i+1}</span><div><div class="st-title">${esc(plain(n.t))}${n.sub?` <span style="color:var(--muted);font-weight:500">· ${esc(n.sub)}</span>`:''} ${layerTag(n)} ${ans?`<span class="ans ${ans}">${ans==='yes'?'Yes':'No'} →</span>`:''}</div><div class="st-desc">${esc(n.d)}</div>${stages}</div>`;
+    li.onclick=()=>goStep(i);
+    li.onmouseenter=()=>nodeEls[nid].classList.add('sel');
+    li.onmouseleave=()=>{if(i!==step)nodeEls[nid].classList.remove('sel')};
+    stepsEl.appendChild(li);
+  });
+}
+function markStep(i){
+  if(!cur)return;step=i;
+  Object.values(nodeEls).forEach(g=>g.classList.remove('cur'));
+  nodeEls[cur.p[i]].classList.add('cur');
+  [...stepsEl.children].forEach((li,j)=>li.classList.toggle('cur',j===i));
+  const li=stepsEl.children[i];
+  if(li){const top=li.offsetTop-stepsEl.offsetTop, b=top+li.offsetHeight;
+    if(top<stepsEl.scrollTop)stepsEl.scrollTop=top-6;else if(b>stepsEl.scrollTop+stepsEl.clientHeight)stepsEl.scrollTop=b-stepsEl.clientHeight+6}
+  showDetails(cur.p[i]);
+  $('#now').textContent=`Step ${i+1}/${cur.p.length}: ${plain(byId[cur.p[i]].t)}`;
+  $('#bPrev').disabled=i===0;$('#bNext').disabled=i===cur.p.length-1;
+}
+function goStep(i){if(!cur)return;stop();i=Math.max(0,Math.min(cur.p.length-1,i));dist=route.stepD[i];placeDot();markStep(i)}
+function tick(t){
+  if(!playing)return;
+  const dt=Math.min(.05,(t-lastT)/1000);lastT=t;
+  dist+=SPEED*dt;
+  if(dist>=route.total){dist=route.total;placeDot();markStep(cur.p.length-1);stop();return}
+  placeDot();
+  let i=step;while(i+1<route.stepD.length&&route.stepD[i+1]<=dist)i++;
+  if(i!==step)markStep(i);
+  raf=requestAnimationFrame(tick);
+}
+function play(){if(!cur)setScenario(SCENARIOS[0].id);if(dist>=route.total){dist=0;markStep(0)}playing=true;$('#bPlay').textContent='⏸ Pause';lastT=performance.now();raf=requestAnimationFrame(tick)}
+function stop(){playing=false;cancelAnimationFrame(raf);$('#bPlay').textContent='▶ Play'}
+$('#bPlay').onclick=()=>playing?stop():play();
+$('#bPrev').onclick=()=>goStep(step-1);
+$('#bNext').onclick=()=>goStep(step+1);
+$('#bFirst').onclick=()=>{goStep(0)};
+$('#bClear').onclick=clearScenario;
+document.addEventListener('keydown',e=>{
+  if(e.target.closest('input,textarea'))return;
+  if(e.key==='Escape')clearScenario();
+  if(!cur)return;
+  if(e.key==='ArrowRight'){e.preventDefault();goStep(step+1)}
+  if(e.key==='ArrowLeft'){e.preventDefault();goStep(step-1)}
+});
+
+/* ---------------- chains reference & legends ---------------- */
+const chainsEl=$('#chains');
+Object.keys(CHAINS).forEach(c=>{
+  const row=h('div',{class:'chainrow'});
+  const nm=h('div',{class:'chainname',title:'Show details'});nm.textContent=c.toUpperCase();nm.onclick=()=>showChain(c);
+  const fl=h('div',{class:'flowline'},CHAINS[c].map(s=>`<span class="stg ${s[1]==='cond'?'cond':''}" style="--tc:var(${TABLES[s[1]][1]})" title="${esc(s[3])}">${esc(s[0])}</span>`).join('<span class="arrow">→</span>'));
+  row.append(nm,fl);chainsEl.appendChild(row);
+});
+$('#tlegend').innerHTML=Object.entries(TABLES).filter(([k])=>k!=='ttl').map(([k,[n,v]])=>`<span><i class="sw" style="--tc:var(${v})"></i>${n}</span>`).join('');
+
+const shapesEl=$('#shapes');
+[['decision','Decision (yes / no)'],['para','Lookup / decision table'],['chain','Firewall chain (expands)'],['box','Processing step'],['hex','Router itself'],['pill','Interface'],['portal','Jump to another part']]
+.forEach(([s,label])=>{
+  const d=h('div');const sv=document.createElementNS(NS,'svg');sv.setAttribute('width',74);sv.setAttribute('height',34);sv.setAttribute('viewBox','0 0 74 34');
+  const g=el('g',{class:'node '+s},sv);shapeOf({s,x:37,y:17,w:66,h:26,L:s==='pill'?'if':s==='hex'?'loc':s==='decision'?'sw':'l3',c:s==='pill'?'--in':undefined},g);
+  d.append(sv,document.createTextNode(label));shapesEl.appendChild(d);
+});
+const lay=h('div',{},`<span style="display:flex;gap:14px;flex-wrap:wrap">${['l2','mpls','l3','loc'].map(k=>`<span style="display:inline-flex;align-items:center;gap:6px"><i class="sw" style="--tc:var(--${k})"></i>${LAYERS[k].name}</span>`).join('')}</span>`);
+shapesEl.appendChild(lay);
+
+/* ---------------- theme ---------------- */
+$('#themeBtn').onclick=()=>{
+  const r=document.documentElement, dark=r.dataset.theme?r.dataset.theme==='dark':matchMedia('(prefers-color-scheme: dark)').matches;
+  r.dataset.theme=dark?'light':'dark';
+};
+
+fit();addEventListener('resize',()=>{});
+setScenario('fwd');
+</script>
+</body>
+</html>
