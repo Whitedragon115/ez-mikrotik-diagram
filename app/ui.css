@@ -254,3 +254,4 @@
 .readme-foot { padding: 12px 20px; border-top: 1px solid var(--rule); display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .readme-foot label { display: flex; align-items: center; gap: 8px; font-weight: 600; }
 .readme-foot .sp { flex: 1; }
+.btn.gh-link { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
