@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSim } from "@/lib/store";
-import { ifaceNet, inRange, isIp, parseRange } from "@/lib/sim/ip";
+import { connectedNets, ifaceNet, inRange, isIp, parseRange, splitGateway } from "@/lib/sim/ip";
 import { ROS_NAMES } from "@/lib/sim/rules";
 import { toScript } from "@/lib/sim/nodes";
 import type { ConnEntry, Iface, RouterConfig, Rule, Table } from "@/lib/sim/types";
@@ -404,7 +404,11 @@ function RoutesTable({ cfg, find, open }: Props) {
   const rows = useMemo(() => {
     const up = cfg.addresses.filter((a) => !a.disabled && cfg.interfaces.some((i) => i.name === a.interface && !i.disabled));
     const connected = up.map((a) => ({ dst: ifaceNet(a.address)?.network ?? "", gateway: a.interface, distance: 0, table: "main", flags: "DAc", comment: undefined as string | undefined, disabled: false }));
-    const reach = (gw: string) => !isIp(gw) || connected.some((c) => inRange(gw, c.dst));
+    const reach = (gw: string) => {
+      const g = splitGateway(gw);
+      if (g.iface) return cfg.interfaces.some((i) => i.name === g.iface && !i.disabled);
+      return !!g.ip && up.some((a) => connectedNets(a).some((net) => inRange(g.ip!, net)));
+    };
     const statics = cfg.routes.map((r) => ({ ...r, flags: r.disabled ? "" : reach(r.gateway) ? "As" : "s" }));
     return [...statics, ...connected]
       .sort((a, b) => (parseRange(a.dst)?.lo ?? 0) - (parseRange(b.dst)?.lo ?? 0))

@@ -1,6 +1,6 @@
 // Packet-flow simulator: walks one packet through the RouterOS packet-flow graph,
 // evaluating the configured rules at every hook and recording a step-by-step trace.
-import { inRange, ifaceNet, isIp, neg, parsePort, parseRange, portMatch, intToIp } from "./ip";
+import { connectedNets, inRange, ifaceNet, isIp, neg, parsePort, parseRange, portMatch, intToIp, splitGateway } from "./ip";
 import { rosName, type RuleKey } from "./rules";
 import type {
   ConnEntry, ConnState, Iface, PacketInput, Pkt, PktSnap, RouterConfig, RoutingRule, Rule, RuleEval, SimResult,
@@ -70,8 +70,10 @@ function service(p: Pkt): string {
 
 class Sim {
   steps: TraceStep[] = [];
-  /** why candidate routes were rejected in the last lookup */
+  /** why candidate routes were rejected in this lookup (all tables tried) */
   routeWhy: string[] = [];
+  /** the same, for the most recent pick() only */
+  lastWhy: string[] = [];
   hits: Record<string, number> = {};
   conntrack: ConnEntry[];
   nextConnId: number;
@@ -430,27 +432,40 @@ class Sim {
   pick(t: string, dst: string): RouteHit | null {
     const connected = this.cfg.addresses
       .filter((a) => !a.disabled && this.iface(a.interface))
-      .map((a) => ({ dst: ifaceNet(a.address)?.network ?? "", gateway: a.interface, distance: 0, table: "main", connected: true }));
+      .flatMap((a) => connectedNets(a).map((net) => ({ dst: net, gateway: a.interface, distance: 0, table: "main", connected: true })));
     const all = [...connected, ...this.cfg.routes.filter((r) => !r.disabled).map((r) => ({ ...r, connected: false }))];
-    {
-      const cands = all
-        .filter((r) => r.table === t && inRange(dst, r.dst))
-        .sort((a, b) => (parseRange(b.dst)?.len ?? 0) - (parseRange(a.dst)?.len ?? 0) || a.distance - b.distance);
-      for (const r of cands) {
-        const internet = r.dst === "0.0.0.0/0" || undefined;
-        if (r.connected) return { iface: r.gateway, nextHop: dst, desc: `connected route ${r.dst} on ${r.gateway}` };
-        if (isIp(r.gateway)) {
-          const via = connected.find((cr) => inRange(r.gateway, cr.dst));
-          if (via) return { iface: via.gateway, nextHop: r.gateway, internet, desc: `route ${r.dst} via ${r.gateway} (distance ${r.distance}, table ${t})` };
-          this.routeWhy.push(`Route ${r.dst} via ${r.gateway} (table ${t}) is inactive: the gateway is not on any connected subnet. Does the router have an address in that network? WAN addresses often come from DHCP or PPPoE.`);
-        } else if (this.iface(r.gateway)) {
-          return { iface: r.gateway, nextHop: dst, internet, desc: `route ${r.dst} via interface ${r.gateway} (table ${t})` };
-        } else {
-          this.routeWhy.push(`Route ${r.dst} via ${r.gateway} (table ${t}) is inactive: interface "${r.gateway}" does not exist or is disabled.`);
-        }
+    const why: string[] = [];
+    this.lastWhy = why;
+    const inactive = (msg: string) => {
+      why.push(msg);
+      if (!this.routeWhy.includes(msg)) this.routeWhy.push(msg);
+    };
+    const cands = all
+      .filter((r) => r.table === t && inRange(dst, r.dst))
+      .sort((a, b) => (parseRange(b.dst)?.len ?? 0) - (parseRange(a.dst)?.len ?? 0) || a.distance - b.distance);
+    for (const r of cands) {
+      const internet = r.dst === "0.0.0.0/0" || undefined;
+      if (r.connected) return { iface: r.gateway, nextHop: dst, desc: `connected route ${r.dst} on ${r.gateway}` };
+      const gw = splitGateway(r.gateway);
+      const label = `Route ${r.dst} via ${r.gateway} (table ${t})`;
+      if (gw.iface && !this.iface(gw.iface)) {
+        inactive(`${label} is inactive: interface "${gw.iface}" does not exist or is disabled.`);
+      } else if (gw.ip && gw.iface) {
+        // ip%interface: the next hop is reached through that interface, typical for PPPoE / VPN peers
+        return { iface: gw.iface, nextHop: gw.ip, internet, desc: `route ${r.dst} via ${gw.ip} on ${gw.iface} (distance ${r.distance}, table ${t})` };
+      } else if (gw.ip) {
+        const via = connected.find((cr) => inRange(gw.ip!, cr.dst));
+        if (via) return { iface: via.gateway, nextHop: gw.ip, internet, desc: `route ${r.dst} via ${gw.ip} on ${via.gateway} (distance ${r.distance}, table ${t})` };
+        inactive(
+          `${label} is inactive: ${gw.ip} is not on any connected network. If it is a PPPoE / VPN peer, write the gateway as ${gw.ip}%<interface> (e.g. ${gw.ip}%pppoe-out1), or set it as the peer of that interface's /32 address under IP addresses.`,
+        );
+      } else if (gw.iface) {
+        return { iface: gw.iface, nextHop: dst, internet, desc: `route ${r.dst} via interface ${gw.iface} (table ${t})` };
+      } else {
+        inactive(`${label} is inactive: it has no gateway.`);
       }
-      return null;
     }
+    return null;
   }
 
   /** Why a routing rule doesn't match this packet, or null when it matches. */
@@ -481,16 +496,20 @@ class Sim {
       if (r.action === "unreachable") return { drop: `${label} matched: dropped, and ICMP network unreachable is sent back.`, notes };
       const hit = this.pick(r.table, p.dst);
       if (hit) return { hit, notes: [...notes, `${label} matched → lookup in table "${r.table}".`] };
+      const why = this.lastWhy;
+      const none = why.length ? `has no active route to ${p.dst}` : `has no route to ${p.dst}`;
       if (r.action === "lookup-only-in-table")
-        return { drop: `${label} matched, but table "${r.table}" has no route to ${p.dst}, and lookup-only-in-table doesn't fall back.`, notes: [...notes, ...this.routeWhy] };
-      notes.push(`${label} matched, but table "${r.table}" has no route to ${p.dst}; trying the next rule.`);
+        return { drop: `${label} matched, but table "${r.table}" ${none}, and lookup-only-in-table doesn't fall back.`, notes: [...notes, ...why] };
+      notes.push(`${label} matched, but table "${r.table}" ${none}; trying the next rule.`, ...why);
     }
     const table = mark || "main";
     const hit = this.pick(table, p.dst);
     if (hit) return { hit, notes };
     if (table !== "main") {
+      const tableWhy = this.lastWhy;
+      const why = tableWhy.filter((w) => !notes.includes(w));
       const fb = this.pick("main", p.dst);
-      if (fb) return { hit: fb, notes: [...notes, `Table "${table}" had no route; fell back to main.`] };
+      if (fb) return { hit: fb, notes: [...notes, ...why, `Table "${table}" had no ${tableWhy.length ? "active " : ""}route; fell back to main.`] };
     }
     return { drop: `No route to ${p.dst}${mark ? ` in table "${mark}"` : ""}.`, notes: [...notes, ...this.noRouteNotes(p.dst)] };
   }

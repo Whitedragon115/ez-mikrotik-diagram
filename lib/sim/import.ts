@@ -1,7 +1,7 @@
 // Import a real RouterOS configuration: parse `/export` scripts (.rsc) or REST API rows,
 // then convert the parts the simulator understands into a RouterConfig.
 import { newId, rosToRuleKey, TABLE_INFO } from "./rules";
-import { isIp } from "./ip";
+import { connectedNets, inRange, isIp } from "./ip";
 import type { Iface, IfaceType, RouterConfig, RoutingRuleAction, Rule, Table } from "./types";
 
 /** One `add`/`set` line (or one REST object): RouterOS property → value */
@@ -266,17 +266,22 @@ export function buildConfig(sections: Sections, warnings: string[], source: stri
   // addresses & routes
   for (const r of sections["/ip address"] ?? []) {
     if (!r.address) continue;
-    cfg.addresses.push({ address: r.address.includes("/") ? r.address : `${r.address}/32`, interface: r.interface, disabled: yes(r.disabled) || undefined });
+    const address = r.address.includes("/") ? r.address : `${r.address}/32`;
+    // a /32 with network=<other ip> is a point-to-point address: network is the peer
+    const peer = address.endsWith("/32") && r.network && isIp(r.network) && r.network !== address.split("/")[0] ? r.network : undefined;
+    cfg.addresses.push({ address, interface: r.interface, network: peer, disabled: yes(r.disabled) || undefined });
     iface(r.interface);
   }
   for (const r of sections["/ip route"] ?? []) {
     if (yes(r.connect) || (yes(r.dynamic) && !r.gateway)) continue; // connected routes are rebuilt from addresses
-    const gw = (r.gateway ?? "").split(",")[0].split("%")[0];
+    // keep "ip%interface": with several PPPoE sessions to the same peer, the interface is what tells them apart
+    const gw = (r.gateway ?? "").split(",")[0].trim();
     if (!gw) {
       warnings.push(`Route ${r["dst-address"] ?? "0.0.0.0/0"} has no gateway (type=${r.type ?? "?"}): skipped.`);
       continue;
     }
-    if (!isIp(gw)) iface(gw);
+    const gwIface = gw.includes("%") ? gw.slice(gw.indexOf("%") + 1) : isIp(gw) ? undefined : gw;
+    if (gwIface) iface(gwIface);
     cfg.routes.push({
       dst: r["dst-address"] ?? "0.0.0.0/0",
       gateway: gw,
@@ -337,6 +342,23 @@ export function buildConfig(sections: Sections, warnings: string[], source: stri
     if (wantsDefault && !hasDefault()) {
       cfg.routes.push({ dst: "0.0.0.0/0", gateway: name, distance: Number(r["default-route-distance"] ?? 1) || 1, table: "main", comment: `[dynamic] default route from ${label}` });
       warnings.push(`Added default route 0.0.0.0/0 via ${name}: the ${label} creates it dynamically (add-default-route), so it isn't in the export.`);
+    }
+  }
+
+  // Routes via a PPP peer IP: the peer is the dynamic PPP address's network=, which isn't in the export.
+  // With one PPP client it can only be that one, so record the peer on its placeholder address.
+  const pppIfaces = clients.filter(([k, r]) => k !== "dhcp" && !yes(r.disabled)).map(([, r]) => r.name).filter(Boolean);
+  const reachable = (ip: string) => cfg.addresses.some((a) => !a.disabled && connectedNets(a).some((net) => inRange(ip, net)));
+  for (const rt of cfg.routes) {
+    if (!isIp(rt.gateway) || rt.disabled || reachable(rt.gateway)) continue;
+    const a = pppIfaces.length === 1 ? cfg.addresses.find((x) => x.interface === pppIfaces[0] && x.address.endsWith("/32") && !x.network) : undefined;
+    if (a) {
+      a.network = rt.gateway;
+      warnings.push(`Route ${rt.dst} via ${rt.gateway}: that gateway isn't on any connected network, so it was taken as the peer of ${a.interface} (its PPP server). Check it under Router → IP addresses.`);
+    } else {
+      warnings.push(
+        `Route ${rt.dst} via ${rt.gateway} (table ${rt.table}) is inactive: the gateway isn't on any connected network.${pppIfaces.length > 1 ? ` With several PPP clients (${pppIfaces.join(", ")}), write the gateway as ${rt.gateway}%<interface> to say which one it uses.` : ""}`,
+      );
     }
   }
 

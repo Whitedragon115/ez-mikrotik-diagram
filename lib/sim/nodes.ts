@@ -147,7 +147,7 @@ export function toScript(cfg: RouterConfig): string {
   sec("/interface bridge settings", [`set use-ip-firewall=${cfg.bridge.useIpFirewall ? "yes" : "no"}`]);
   sec("/interface list", cfg.interfaceLists.map((l) => `add name=${q(l.name)}`));
   sec("/interface list member", cfg.interfaceLists.flatMap((l) => l.members.split(",").filter(Boolean).map((m) => `add list=${q(l.name)} interface=${q(m.trim())}`)));
-  sec("/ip address", cfg.addresses.map((a) => `add ${kv({ address: a.address, interface: a.interface, disabled: a.disabled })}`));
+  sec("/ip address", cfg.addresses.map((a) => `add ${kv({ address: a.address, network: a.network, interface: a.interface, disabled: a.disabled })}`));
   const rrules = cfg.routingRules ?? [];
   const tables = [...new Set([...cfg.routes.map((r) => r.table), ...rrules.filter((r) => r.action.startsWith("lookup")).map((r) => r.table)].filter((t) => t && t !== "main"))];
   sec("/routing table", tables.map((t) => `add name=${q(t)} fib`));

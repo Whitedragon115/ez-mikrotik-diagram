@@ -21,12 +21,14 @@ export interface Iface {
 export interface Address {
   address: string; // 192.168.88.1/24
   interface: string;
+  /** point-to-point peer of a /32 address (RouterOS network=), e.g. the PPPoE server; adds a connected route to it */
+  network?: string;
   disabled?: boolean;
 }
 
 export interface Route {
   dst: string;
-  gateway: string; // IP or interface name
+  gateway: string; // IP, interface name, or "IP%interface" (next hop reached through that interface)
   distance: number;
   table: string;
   disabled?: boolean;

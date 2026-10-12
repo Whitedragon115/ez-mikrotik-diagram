@@ -52,6 +52,21 @@ export function ifaceNet(address: string) {
   return r && { ip, len, network: `${intToIp(r.lo)}/${len}` };
 }
 
+/** Connected networks of an address: its subnet, plus the peer's /32 for point-to-point addresses (network=). */
+export function connectedNets(a: { address: string; network?: string }): string[] {
+  const own = ifaceNet(a.address);
+  if (!own) return [];
+  const peer = own.len === 32 && a.network && isIp(a.network) && a.network !== own.ip ? [`${a.network}/32`] : [];
+  return [own.network, ...peer];
+}
+
+/** RouterOS gateway: "10.0.0.1", "pppoe-out1" or "10.0.0.1%pppoe-out1" */
+export function splitGateway(gw: string): { ip?: string; iface?: string } {
+  const i = gw.indexOf("%");
+  if (i >= 0) return { ip: isIp(gw.slice(0, i)) ? gw.slice(0, i) : undefined, iface: gw.slice(i + 1) || undefined };
+  return isIp(gw) ? { ip: gw } : { iface: gw || undefined };
+}
+
 export function validPrefix(spec: string) {
   return parseRange(spec) !== null;
 }

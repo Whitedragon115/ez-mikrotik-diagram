@@ -1,7 +1,7 @@
 "use client";
 
 import { useSim } from "@/lib/store";
-import { isIp, validPrefix } from "@/lib/sim/ip";
+import { isIp, splitGateway, validPrefix } from "@/lib/sim/ip";
 import type { Address, AddrListEntry, BridgeHost, Iface, IfaceList, IfaceType, IpsecPolicy, QueueTree, Route, RoutingRule, RoutingRuleAction, SimpleQueue } from "@/lib/sim/types";
 import { RowsEditor, Toggle, type ColDef } from "../ui/form";
 
@@ -56,6 +56,7 @@ export function AddressesEditor() {
   const cols: ColDef<Address>[] = [
     { key: "address", label: "Address", placeholder: "192.168.1.1/24", validate: ipOrPrefix, mono: true },
     { key: "interface", label: "Interface", options: ifaces },
+    { key: "network", label: "Peer (point-to-point)", placeholder: "e.g. PPPoE server IP", validate: isIp, mono: true, show: (r) => r.address.endsWith("/32") },
   ];
   return (
     <RowsEditor
@@ -75,14 +76,27 @@ export function RoutesEditor() {
   const { ifaces, tables } = useNames();
   const cols: ColDef<Route>[] = [
     { key: "dst", label: "Dst. address", validate: ipOrPrefix, mono: true },
-    { key: "gateway", label: "Gateway", suggestions: ifaces, validate: (v) => isIp(v) || ifaces.includes(v), mono: true },
+    {
+      key: "gateway",
+      label: "Gateway",
+      suggestions: ifaces,
+      placeholder: "IP, interface, or IP%interface",
+      mono: true,
+      validate: (v) => {
+        const g = splitGateway(v);
+        return v.includes("%") ? !!g.ip && !!g.iface && ifaces.includes(g.iface) : isIp(v) || ifaces.includes(v);
+      },
+    },
     { key: "distance", label: "Distance", type: "number" },
     { key: "table", label: "Routing table", suggestions: tables },
     { key: "comment", label: "Comment", wide: true },
   ];
   return (
     <>
-      <p className="muted small">Connected routes are created automatically from IP addresses. A mangle <code>mark-routing</code> selects a table by name.</p>
+      <p className="muted small">
+        Connected routes are created automatically from IP addresses. A mangle <code>mark-routing</code> selects a table by name. For a PPPoE / VPN peer, use{" "}
+        <code>IP%interface</code> as the gateway, e.g. <code>168.95.98.254%pppoe-out1</code>.
+      </p>
       <RowsEditor
         rows={rows}
         cols={cols}
