@@ -1,5 +1,7 @@
 "use client";
 
+import Resizer from "../ui/Resizer";
+import { DEFAULT_LAYOUT } from "@/lib/store";
 import { useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useSim } from "@/lib/store";
@@ -56,6 +58,7 @@ export default function Inspector() {
 
   return (
     <aside className="panel inspector no-canvas">
+      <Resizer edge="left" label="Resize panel" value={() => useSim.getState().layout.rightW} min={320} max={() => window.innerWidth * 0.6} reset={DEFAULT_LAYOUT.rightW} onChange={(v) => useSim.getState().setLayout({ rightW: v })} />
       <div className="panel-head">
         <div>
           <div className="eyebrow" style={{ color: `var(${color})` }}>{LAYERS[n.L].name}</div>

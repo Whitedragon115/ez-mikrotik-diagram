@@ -1,5 +1,7 @@
 "use client";
 
+import Resizer from "../ui/Resizer";
+import { DEFAULT_LAYOUT } from "@/lib/store";
 import { useState } from "react";
 import { useSim } from "@/lib/store";
 import { PRESETS } from "@/lib/sim/defaults";
@@ -131,6 +133,7 @@ export default function LeftPanel() {
   if (!tab) return null;
   return (
     <aside className="panel left no-canvas">
+      <Resizer edge="right" label="Resize panel" value={() => useSim.getState().layout.leftW} min={280} max={() => window.innerWidth * 0.5} reset={DEFAULT_LAYOUT.leftW} onChange={(v) => useSim.getState().setLayout({ leftW: v })} />
       <div className="panel-head tabs-head">
         <div className="tabs big">
           <button className={tab === "packet" ? "tab on" : "tab"} onClick={() => setLeft("packet")}>Packet</button>

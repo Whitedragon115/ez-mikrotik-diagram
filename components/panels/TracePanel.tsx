@@ -5,7 +5,8 @@ import { useSim } from "@/lib/store";
 import { byId, plain } from "@/lib/flow";
 import { formatRule } from "@/lib/sim/rules";
 import { decisionTag, explain } from "@/lib/sim/explain";
-import PacketView from "./PacketView";
+import Resizer from "../ui/Resizer";
+import { DEFAULT_LAYOUT } from "@/lib/store";
 import type { StageResult } from "@/lib/sim/types";
 
 const NO_RULES: never[] = [];
@@ -44,6 +45,7 @@ export default function TracePanel() {
   const cfg = useSim((s) => s.cfg);
   const { setStep, setPlaying, setTrace, select, clearConnections, reply } = useSim.getState();
   const open = useSim((s) => s.trace);
+  const pktOpen = useSim((s) => s.pktWin.open);
   const [tab, setTab] = useState<"steps" | "conns">("steps");
   const listRef = useRef<HTMLOListElement>(null);
 
@@ -67,6 +69,7 @@ export default function TracePanel() {
 
   return (
     <section className="panel trace no-canvas">
+      <Resizer edge="top" label="Resize trace" value={() => useSim.getState().layout.traceH} min={140} max={() => window.innerHeight - 180} reset={DEFAULT_LAYOUT.traceH} onChange={(v) => useSim.getState().setLayout({ traceH: v })} />
       <div className="trace-head">
         <div className="tabs">
           <button className={tab === "steps" ? "tab on" : "tab"} onClick={() => setTab("steps")}>Trace</button>
@@ -90,6 +93,9 @@ export default function TracePanel() {
           </>
         )}
         <span className="sp" />
+        <button className={pktOpen ? "btn sm on" : "btn sm"} onClick={() => useSim.getState().setPktWin({ open: !pktOpen })} title="Show or hide the floating packet inspector">
+          Packet inspector
+        </button>
         <button className="icon" onClick={() => setTrace(false)} title="Hide">▾</button>
       </div>
 
@@ -128,7 +134,6 @@ export default function TracePanel() {
 
               </div>
             )}
-            {cur && <PacketView cur={cur.pkt} prev={prev?.pkt} step={step} />}
           </div>
         ) : (
           <div className="empty">Pick a preset or press <b>Send packet</b> in the Packet panel to simulate.</div>

@@ -14,6 +14,7 @@ import TracePanel from "./panels/TracePanel";
 import ImportDialog from "./panels/ImportDialog";
 import SaveDialog from "./panels/SaveDialog";
 import ExportDialog from "./panels/ExportDialog";
+import PacketWindow from "./panels/PacketWindow";
 import ThemeToggle from "./ThemeToggle";
 
 const SPEED = 420; // world units per second
@@ -39,6 +40,7 @@ export default function Simulator() {
   const { setStep, setPlaying, select, setLeft, setTrace, setExplain } = useSim.getState();
   const explainOn = useSim((s) => s.explain);
   const savedRef = useSim((s) => s.savedRef);
+  const layout = useSim((s) => s.layout);
   const narrow = useNarrow();
   const [follow, setFollow] = useState(true);
 
@@ -75,8 +77,8 @@ export default function Simulator() {
     () =>
       narrow
         ? { left: 0, right: 0, top: 56, bottom: trace ? Math.round(window.innerHeight * 0.46) + 16 : 0 }
-        : { left: left ? 372 : 0, right: inspector && selected ? 432 : 0, top: 64, bottom: trace ? 312 : 0 },
-    [narrow, left, inspector, selected, trace],
+        : { left: left ? layout.leftW + 12 : 0, right: inspector && selected ? layout.rightW + 12 : 0, top: 64, bottom: trace ? layout.traceH + 24 : 0 },
+    [narrow, left, inspector, selected, trace, layout],
   );
 
   const followRef = useRef(follow);
@@ -168,7 +170,13 @@ export default function Simulator() {
   );
 
   return (
-    <div className="app" data-left={left ? 1 : 0} data-right={inspector && selected ? 1 : 0} data-trace={trace ? 1 : 0}>
+    <div
+      className="app"
+      data-left={left ? 1 : 0}
+      data-right={inspector && selected ? 1 : 0}
+      data-trace={trace ? 1 : 0}
+      style={{ "--left-w": `${layout.leftW}px`, "--right-w": `${layout.rightW}px`, "--trace-h": `${layout.traceH}px` } as React.CSSProperties}
+    >
       <Canvas
         ref={canvas}
         world={{ w: VBW, h: VBH }}
@@ -219,6 +227,7 @@ export default function Simulator() {
       <ImportDialog />
       <SaveDialog />
       <ExportDialog />
+      <PacketWindow />
       {!result && !left && (
         <div className="hint-toast no-canvas">Drag to move · scroll to zoom · click a block to configure it</div>
       )}

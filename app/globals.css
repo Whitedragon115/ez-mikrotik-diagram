@@ -65,7 +65,7 @@ p { margin: 0 0 8px; }
 .zoom-badge { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); font-size: 11px; color: var(--muted); background: var(--glass); border: 1px solid var(--rule); border-radius: 999px; padding: 2px 9px; pointer-events: none; }
 .app[data-trace="1"] .zoom-badge { display: none; }
 .zoombar { position: absolute; top: 68px; display: flex; flex-direction: column; gap: 4px; padding: 4px; background: var(--glass); border: 1px solid var(--rule); border-radius: 12px; box-shadow: var(--shadow); backdrop-filter: blur(10px); right: 12px; transition: right .2s; }
-.app[data-right="1"] .zoombar { right: 444px; }
+.app[data-right="1"] .zoombar { right: calc(var(--right-w, 420px) + 24px); }
 .hint-toast { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--glass); border: 1px solid var(--rule); border-radius: 999px; padding: 7px 16px; color: var(--muted); box-shadow: var(--shadow); }
 
 .layer rect { stroke-dasharray: 6 5; stroke-width: 1.3; }
@@ -141,10 +141,10 @@ p { margin: 0 0 8px; }
 .note.err { border-color: var(--out); color: var(--out); }
 .subhead { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 14px 0 8px; }
 
-.left { top: 68px; left: 12px; bottom: 12px; width: 360px; }
-.inspector { top: 68px; right: 12px; bottom: 12px; width: 420px; }
-.trace { bottom: 12px; height: 288px; left: 12px; right: 12px; }
-.app[data-trace="1"] .left, .app[data-trace="1"] .inspector { bottom: 312px; }
+.left { top: 68px; left: 12px; bottom: 12px; width: var(--left-w, 360px); }
+.inspector { top: 68px; right: 12px; bottom: 12px; width: var(--right-w, 420px); }
+.trace { bottom: 12px; height: var(--trace-h, 288px); left: 12px; right: 12px; }
+.app[data-trace="1"] .left, .app[data-trace="1"] .inspector { bottom: calc(var(--trace-h, 288px) + 24px); }
 .app[data-trace="1"] .hint-toast { display: none; }
 
 .tabs { display: flex; gap: 2px; background: var(--field); border: 1px solid var(--rule); padding: 3px; border-radius: 10px; flex-wrap: wrap; }

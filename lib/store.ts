@@ -7,6 +7,21 @@ import type { ConnEntry, PacketInput, RouterConfig, SimResult } from "./sim/type
 
 export type LeftTab = "packet" | "router";
 
+/** user-chosen panel sizes (px) */
+export interface Layout {
+  leftW: number;
+  rightW: number;
+  traceH: number;
+}
+export const DEFAULT_LAYOUT: Layout = { leftW: 360, rightW: 420, traceH: 288 };
+
+export interface WinRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 interface SimState {
   cfg: RouterConfig;
   packet: PacketInput;
@@ -29,6 +44,9 @@ interface SimState {
   loginResult: string | null;
   /** the saved config (database row) the current setup was loaded from / saved as */
   savedRef: { id: string; name: string } | null;
+  layout: Layout;
+  /** floating packet inspector; rect is null until it has been placed */
+  pktWin: { open: boolean; rect: WinRect | null };
 
   setCfg: (fn: (draft: RouterConfig) => void) => void;
   setPacket: (p: Partial<PacketInput>) => void;
@@ -50,6 +68,8 @@ interface SimState {
   setSaveOpen: (v: boolean) => void;
   setSavedRef: (r: { id: string; name: string } | null) => void;
   loadSaved: (r: { id: string; name: string }, cfg: RouterConfig, packet: PacketInput | null) => void;
+  setLayout: (l: Partial<Layout>) => void;
+  setPktWin: (w: Partial<SimState["pktWin"]>) => void;
 }
 
 export const useSim = create<SimState>()(
@@ -74,6 +94,8 @@ export const useSim = create<SimState>()(
       exportOpen: false,
       loginResult: null,
       savedRef: null,
+      layout: DEFAULT_LAYOUT,
+      pktWin: { open: true, rect: null },
 
       setCfg: (fn) =>
         set((s) => {
@@ -117,11 +139,18 @@ export const useSim = create<SimState>()(
       setSavedRef: (r) => set({ savedRef: r }),
       loadSaved: (r, cfg, packet) =>
         set((s) => ({ cfg, packet: packet ?? s.packet, savedRef: r, templateId: "saved", conntrack: [], hits: {}, result: null, nextConnId: 1, step: 0, playing: false })),
+      setLayout: (l) => set((s) => ({ layout: { ...s.layout, ...l } })),
+      setPktWin: (w) => set((s) => ({ pktWin: { ...s.pktWin, ...w } })),
     }),
     {
       name: "ros-packet-sim-v1",
       storage: createJSONStorage(() => localStorage),
-      partialize: (s) => ({ cfg: s.cfg, packet: s.packet, conntrack: s.conntrack, nextConnId: s.nextConnId, hits: s.hits, templateId: s.templateId, savedRef: s.savedRef }),
+      partialize: (s) => ({ cfg: s.cfg, packet: s.packet, conntrack: s.conntrack, nextConnId: s.nextConnId, hits: s.hits, templateId: s.templateId, savedRef: s.savedRef, layout: s.layout, pktWin: s.pktWin }),
+      // older saved state has no layout/pktWin: fill in the defaults
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<SimState>;
+        return { ...current, ...p, layout: { ...DEFAULT_LAYOUT, ...p.layout }, pktWin: { ...current.pktWin, ...p.pktWin } };
+      },
     },
   ),
 );
