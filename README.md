@@ -112,7 +112,7 @@ share-image links are written into the page at build time. Docker passes it as a
 Bridging (bridge NAT/filter, use-ip-firewall, host table/flooding), raw, connection tracking
 (new/established/untracked, NAT bindings, reply reversal, port remapping), mangle marks (packet / connection /
 routing, TTL), DST-NAT / SRC-NAT / masquerade / redirect, filter accept/drop/reject, routing with longest prefix,
-distance, routing tables and recursive gateways, TTL, IPsec tunnel policies (encrypt/decrypt), VLAN / GRE / IPIP /
+distance, routing tables and recursive gateways, policy routing with `/routing rule` (src/dst address, routing-mark, in-interface; lookup, lookup-only-in-table, drop, unreachable), TTL, IPsec tunnel policies (encrypt/decrypt), VLAN / GRE / IPIP /
 EoIP encapsulation and decapsulation, simple queues and queue trees (match only).
 
 Not simulated: MPLS (drawn for completeness), HotSpot, fasttrack's bypass, custom jump chains, rate limiting.

@@ -33,6 +33,21 @@ export interface Route {
   comment?: string;
 }
 
+export type RoutingRuleAction = "lookup" | "lookup-only-in-table" | "drop" | "unreachable";
+
+/** /routing rule: policy routing, checked in order before the normal route lookup. */
+export interface RoutingRule {
+  srcAddress?: string;
+  dstAddress?: string;
+  routingMark?: string;
+  /** in-interface */
+  interface?: string;
+  action: RoutingRuleAction;
+  table: string;
+  disabled?: boolean;
+  comment?: string;
+}
+
 export interface IfaceList {
   name: string;
   members: string; // comma separated interface names
@@ -117,6 +132,8 @@ export interface RouterConfig {
   interfaces: Iface[];
   addresses: Address[];
   routes: Route[];
+  /** optional so configs saved before routing rules existed still load */
+  routingRules?: RoutingRule[];
   interfaceLists: IfaceList[];
   addressLists: AddrListEntry[];
   bridgeHosts: BridgeHost[];

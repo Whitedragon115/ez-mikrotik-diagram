@@ -2,7 +2,7 @@
 // then convert the parts the simulator understands into a RouterConfig.
 import { newId, rosToRuleKey, TABLE_INFO } from "./rules";
 import { isIp } from "./ip";
-import type { Iface, IfaceType, RouterConfig, Rule, Table } from "./types";
+import type { Iface, IfaceType, RouterConfig, RoutingRuleAction, Rule, Table } from "./types";
 
 /** One `add`/`set` line (or one REST object): RouterOS property → value */
 export type Row = Record<string, string>;
@@ -175,6 +175,7 @@ export function buildConfig(sections: Sections, warnings: string[], source: stri
     interfaces: [],
     addresses: [],
     routes: [],
+    routingRules: [],
     interfaceLists: [],
     addressLists: [],
     bridgeHosts: [],
@@ -286,6 +287,32 @@ export function buildConfig(sections: Sections, warnings: string[], source: stri
     });
   }
 
+  // policy routing rules
+  const RR_ACTIONS: RoutingRuleAction[] = ["lookup", "lookup-only-in-table", "drop", "unreachable"];
+  const RR_KEYS: Record<string, "srcAddress" | "dstAddress" | "routingMark" | "interface" | "table" | "comment"> = {
+    "src-address": "srcAddress", "dst-address": "dstAddress", "routing-mark": "routingMark", interface: "interface", table: "table", comment: "comment",
+  };
+  for (const [n, r] of rows("/routing rule").entries()) {
+    const rule: NonNullable<RouterConfig["routingRules"]>[number] = { action: "lookup", table: "main", disabled: yes(r.disabled) || undefined };
+    const problems: string[] = [];
+    for (const [k, v] of Object.entries(r)) {
+      if (k === "disabled" || SKIP_KEYS.has(k)) continue;
+      if (k === "action") {
+        if (RR_ACTIONS.includes(v as RoutingRuleAction)) rule.action = v as RoutingRuleAction;
+        else problems.push(`action=${v}`);
+      } else if (RR_KEYS[k]) rule[RR_KEYS[k]] = v;
+      else problems.push(`${k}=${v}`);
+    }
+    if (rule.interface) iface(rule.interface);
+    if (problems.length) {
+      // an unsupported matcher could make the rule match far more than it should: keep it, but disabled
+      rule.comment = `[not simulated: ${problems.join(", ")}]${rule.comment ? " " + rule.comment : ""}`;
+      if (!rule.disabled) warnings.push(`/routing rule #${n}: imported disabled (${problems.join(", ")})`);
+      rule.disabled = true;
+    }
+    cfg.routingRules!.push(rule);
+  }
+
   // Dynamic WAN state is not part of /export: recreate what DHCP / PPPoE / VPN clients would add
   const hasDefault = () => cfg.routes.some((x) => x.dst === "0.0.0.0/0" && x.table === "main" && !x.disabled);
   // PPPoE/VPN clients first: when both exist, their default route is the one that wins on a real router
@@ -352,7 +379,7 @@ export function buildConfig(sections: Sections, warnings: string[], source: stri
   // everything else is outside the simulation
   const HANDLED = new Set([
     "/system identity", "/interface", "/interface ethernet", "/interface bridge", "/interface vlan", "/interface gre", "/interface ipip", "/interface eoip",
-    "/interface bridge port", "/interface bridge settings", "/interface list", "/interface list member", "/ip address", "/ip route",
+    "/interface bridge port", "/interface bridge settings", "/interface list", "/interface list member", "/ip address", "/ip route", "/routing rule",
     "/ip firewall address-list", "/ip ipsec peer", "/ip dhcp-client", "/ip ipsec policy", "/queue simple", "/queue tree", ...Object.keys(RULE_PATHS),
   ]);
   for (const [p, l] of Object.entries(sections)) {
@@ -374,6 +401,7 @@ export function buildConfig(sections: Sections, warnings: string[], source: stri
       { label: "Bridge ports", count: cfg.interfaces.filter((i) => i.bridge).length },
       { label: "IP addresses", count: cfg.addresses.length },
       { label: "Routes", count: cfg.routes.length },
+      { label: "Routing rules", count: cfg.routingRules!.length },
       { label: "Interface lists", count: cfg.interfaceLists.length },
       { label: "Address-list entries", count: cfg.addressLists.length },
       { label: "Filter rules", count: ruleCount("filter") },

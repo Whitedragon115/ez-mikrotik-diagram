@@ -90,7 +90,7 @@ export const TEMPLATES: Template[] = [
   {
     id: "dualwan",
     name: "Dual WAN, policy routing",
-    desc: "Two ISPs. One PC is routed over WAN2 using mangle mark-routing and a second routing table.",
+    desc: "Two ISPs. One PC is sent over WAN2 with mangle mark-routing, a server with a /routing rule; both use a second routing table.",
     build: () => {
       const c = defaultConfig();
       c.interfaces.find((i) => i.name === "ether5")!.comment = "WAN2";
@@ -105,12 +105,18 @@ export const TEMPLATES: Template[] = [
         r({ chain: "prerouting", action: "mark-routing", srcAddress: "192.168.88.20", dstAddressList: "!local-nets", newRoutingMark: "to_wan2", passthrough: false, comment: "PC .20 uses WAN2" }),
       ];
       c.addressLists.push({ list: "local-nets", address: "192.168.0.0/16" }, { list: "local-nets", address: "10.0.0.0/8" });
+      c.routingRules = [
+        { dstAddress: "192.168.0.0/16", action: "lookup-only-in-table", table: "main", comment: "LAN traffic never leaves via WAN2" },
+        { srcAddress: "192.168.88.30", action: "lookup", table: "to_wan2", comment: "server .30 uses WAN2" },
+      ];
       return c;
     },
     packets: [
       { name: "PC .10 → Internet", desc: "Main table → WAN1", p: pk({ src: "192.168.88.10" }) },
       { name: "PC .20 → Internet", desc: "mark-routing → table to_wan2 → WAN2", p: pk({ inInterface: "ether3", src: "192.168.88.20" }) },
       { name: "PC .20 → LAN server", desc: "Excluded by address list, stays local", p: pk({ inInterface: "ether3", src: "192.168.88.20", dst: "192.168.10.50", dport: "80" }) },
+      { name: "Server .30 → Internet", desc: "/routing rule src .30 → table to_wan2 → WAN2", p: pk({ inInterface: "ether4", src: "192.168.88.30" }) },
+      { name: "Server .30 → LAN", desc: "First routing rule keeps LAN traffic in main", p: pk({ inInterface: "ether4", src: "192.168.88.30", dst: "192.168.10.50", dport: "80" }) },
     ],
   },
   {

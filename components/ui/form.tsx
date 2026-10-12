@@ -74,11 +74,18 @@ interface RowsProps<T> {
   title: (row: T, i: number) => ReactNode;
   addLabel?: string;
   empty?: string;
+  /** show ↑/↓ buttons: for lists where order matters */
+  reorder?: boolean;
 }
 
 /** Card-per-row list editor that fits narrow side panels. */
-export function RowsEditor<T extends object>({ rows, cols, onChange, newRow, title, addLabel = "Add", empty }: RowsProps<T>) {
+export function RowsEditor<T extends object>({ rows, cols, onChange, newRow, title, addLabel = "Add", empty, reorder }: RowsProps<T>) {
   const set = (i: number, k: keyof T, v: unknown) => onChange(rows.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
+  const move = (i: number, d: number) => {
+    const next = [...rows];
+    [next[i], next[i + d]] = [next[i + d], next[i]];
+    onChange(next);
+  };
   return (
     <div className="rows">
       {rows.length === 0 && empty && <p className="muted small">{empty}</p>}
@@ -88,6 +95,12 @@ export function RowsEditor<T extends object>({ rows, cols, onChange, newRow, tit
           <div className={disabled ? "rowcard off" : "rowcard"} key={i}>
             <div className="rowhead">
               <span className="rowtitle">{title(row, i)}</span>
+              {reorder && (
+                <>
+                  <button className="icon" title="Move up" disabled={i === 0} onClick={() => move(i, -1)}>↑</button>
+                  <button className="icon" title="Move down" disabled={i === rows.length - 1} onClick={() => move(i, 1)}>↓</button>
+                </>
+              )}
               <button className="icon" title={disabled ? "Enable" : "Disable"} onClick={() => set(i, "disabled" as keyof T, !disabled)}>
                 {disabled ? "○" : "●"}
               </button>

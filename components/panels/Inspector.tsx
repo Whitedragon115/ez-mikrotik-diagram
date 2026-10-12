@@ -7,7 +7,7 @@ import { CHAINS, LAYERS, byId, nodeColor, plain, type ChainKey } from "@/lib/flo
 import { NODE_EDITOR, type RuleTab } from "@/lib/sim/nodes";
 import RulesEditor from "./RulesEditor";
 import {
-  AddressesEditor, BridgeHostsEditor, BridgeSettings, InterfacesEditor, IpsecEditor, QueuesEditor, RoutesEditor,
+  AddressesEditor, BridgeHostsEditor, BridgeSettings, InterfacesEditor, IpsecEditor, QueuesEditor, RoutesEditor, RoutingRulesEditor,
 } from "./editors";
 
 function RuleTabs({ tabs, queues, chain }: { tabs: RuleTab[]; queues?: boolean; chain?: ChainKey }) {
@@ -66,7 +66,13 @@ export default function Inspector() {
       <div className="panel-body">
         <p className="desc">{n.d}</p>
         {ed.kind === "rules" && <RuleTabs tabs={ed.tabs} queues={ed.queues} chain={CHAIN_OF[id]} />}
-        {ed.kind === "routes" && <RoutesEditor />}
+        {ed.kind === "routes" && (
+          <>
+            <RoutesEditor />
+            <h4 className="subhead">Routing rules</h4>
+            <RoutingRulesEditor />
+          </>
+        )}
         {ed.kind === "ipsec" && <IpsecEditor />}
         {ed.kind === "bridgeHosts" && <BridgeHostsEditor />}
         {ed.kind === "bridgePorts" && (

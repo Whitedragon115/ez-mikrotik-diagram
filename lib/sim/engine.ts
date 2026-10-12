@@ -3,7 +3,7 @@
 import { inRange, ifaceNet, isIp, neg, parsePort, parseRange, portMatch, intToIp } from "./ip";
 import { rosName, type RuleKey } from "./rules";
 import type {
-  ConnEntry, ConnState, Iface, PacketInput, Pkt, PktSnap, RouterConfig, Rule, RuleEval, SimResult,
+  ConnEntry, ConnState, Iface, PacketInput, Pkt, PktSnap, RouterConfig, RoutingRule, Rule, RuleEval, SimResult,
   StageResult, Table, TraceStep, Tuple,
 } from "./types";
 
@@ -38,6 +38,21 @@ interface RouteHit {
   desc: string;
   /** matched the default route (0.0.0.0/0): the packet heads to "the Internet" */
   internet?: boolean;
+}
+
+type RouteResult = { hit: RouteHit; notes: string[] } | { drop: string; notes: string[] };
+
+/** "src-address=… action=lookup table=…" as RouterOS would print it */
+export function describeRoutingRule(r: RoutingRule): string {
+  const parts = [
+    r.srcAddress && `src-address=${r.srcAddress}`,
+    r.dstAddress && `dst-address=${r.dstAddress}`,
+    r.routingMark && `routing-mark=${r.routingMark}`,
+    r.interface && `interface=${r.interface}`,
+    `action=${r.action}`,
+    r.action.startsWith("lookup") && `table=${r.table}`,
+  ];
+  return parts.filter(Boolean).join(" ");
 }
 
 const clone = (p: Pkt): Pkt => ({ ...p, inner: p.inner && clone(p.inner) });
@@ -411,14 +426,13 @@ class Sim {
     ];
   }
 
-  lookup(dst: string, mark?: string): (RouteHit & { fallback?: boolean }) | null {
-    const table = mark || "main";
+  /** Best active route to dst in one routing table; inactive candidates are explained in routeWhy. */
+  pick(t: string, dst: string): RouteHit | null {
     const connected = this.cfg.addresses
       .filter((a) => !a.disabled && this.iface(a.interface))
       .map((a) => ({ dst: ifaceNet(a.address)?.network ?? "", gateway: a.interface, distance: 0, table: "main", connected: true }));
     const all = [...connected, ...this.cfg.routes.filter((r) => !r.disabled).map((r) => ({ ...r, connected: false }))];
-    this.routeWhy = [];
-    const pick = (t: string) => {
+    {
       const cands = all
         .filter((r) => r.table === t && inRange(dst, r.dst))
         .sort((a, b) => (parseRange(b.dst)?.len ?? 0) - (parseRange(a.dst)?.len ?? 0) || a.distance - b.distance);
@@ -436,11 +450,49 @@ class Sim {
         }
       }
       return null;
-    };
-    const hit = pick(table);
-    if (hit || table === "main") return hit;
-    const fb = pick("main");
-    return fb && { ...fb, fallback: true };
+    }
+  }
+
+  /** Why a routing rule doesn't match this packet, or null when it matches. */
+  ruleMiss(r: RoutingRule, p: Pkt, c: Ctx, mark?: string): string | null {
+    if (r.srcAddress && !(p.src && inRange(p.src, r.srcAddress))) return `src ${p.src || "(not chosen yet)"} is not in ${r.srcAddress}`;
+    if (r.dstAddress && !inRange(p.dst, r.dstAddress)) return `dst ${p.dst} is not in ${r.dstAddress}`;
+    if (r.routingMark && r.routingMark !== mark) return `routing-mark is ${mark ? `"${mark}"` : "not set"}, rule wants "${r.routingMark}"`;
+    if (r.interface && r.interface !== c.inIface) return c.inIface ? `arrived on ${c.inIface}, rule wants ${r.interface}` : `router-generated, rule wants in-interface ${r.interface}`;
+    return null;
+  }
+
+  /**
+   * Route a packet the way RouterOS v7 does: /routing rule entries in order, then the table picked by the
+   * routing mark (falling back to main when it has no route), then main.
+   */
+  route(p: Pkt, c: Ctx, mark = p.routingMark): RouteResult {
+    this.routeWhy = [];
+    const notes: string[] = [];
+    for (const [i, r] of (this.cfg.routingRules ?? []).entries()) {
+      if (r.disabled) continue;
+      const label = `Routing rule #${i} (${describeRoutingRule(r)})`;
+      const miss = this.ruleMiss(r, p, c, mark);
+      if (miss) {
+        notes.push(`${label}: no match, ${miss}.`);
+        continue;
+      }
+      if (r.action === "drop") return { drop: `${label} matched: the packet is dropped.`, notes };
+      if (r.action === "unreachable") return { drop: `${label} matched: dropped, and ICMP network unreachable is sent back.`, notes };
+      const hit = this.pick(r.table, p.dst);
+      if (hit) return { hit, notes: [...notes, `${label} matched → lookup in table "${r.table}".`] };
+      if (r.action === "lookup-only-in-table")
+        return { drop: `${label} matched, but table "${r.table}" has no route to ${p.dst}, and lookup-only-in-table doesn't fall back.`, notes: [...notes, ...this.routeWhy] };
+      notes.push(`${label} matched, but table "${r.table}" has no route to ${p.dst}; trying the next rule.`);
+    }
+    const table = mark || "main";
+    const hit = this.pick(table, p.dst);
+    if (hit) return { hit, notes };
+    if (table !== "main") {
+      const fb = this.pick("main", p.dst);
+      if (fb) return { hit: fb, notes: [...notes, `Table "${table}" had no route; fell back to main.`] };
+    }
+    return { drop: `No route to ${p.dst}${mark ? ` in table "${mark}"` : ""}.`, notes: [...notes, ...this.noRouteNotes(p.dst)] };
   }
 
   /* ---------- flow ---------- */
@@ -557,10 +609,11 @@ class Sim {
       this.push("rd_in", p, c, { notes: [`${p.dst} is one of the router's addresses → INPUT.`] });
       return this.input(p, c);
     }
-    const rt = this.lookup(p.dst, p.routingMark);
-    if (!rt) this.dropAt("rd_in", p, c, `No route to ${p.dst}${p.routingMark ? ` in table "${p.routingMark}"` : ""}.`, this.noRouteNotes(p.dst));
+    const res = this.route(p, c);
+    if ("drop" in res) this.dropAt("rd_in", p, c, res.drop, res.notes);
+    const rt = res.hit;
     Object.assign(c, { outIface: rt.iface, nextHop: rt.nextHop, internet: rt.internet });
-    this.push("rd_in", p, c, { notes: [`Not for the router → FORWARD.`, `Matched ${rt.desc}.`, ...(rt.fallback ? [`Table "${p.routingMark}" had no route; fell back to main.`] : [])] });
+    this.push("rd_in", p, c, { notes: [`Not for the router → FORWARD.`, ...res.notes, `Matched ${rt.desc}.`] });
     this.forward(p, c, "r_forward");
     this.postrouting("r_post", p, c);
     this.ipsecOut(p, c);
@@ -723,10 +776,11 @@ class Sim {
   }
 
   routeOut(p: Pkt, c: Ctx): void {
-    const rt = this.lookup(p.dst, p.routingMark);
-    if (!rt) this.dropAt("rd_out", p, c, `No route to ${p.dst}.`, this.noRouteNotes(p.dst));
+    const res = this.route(p, c);
+    if ("drop" in res) this.dropAt("rd_out", p, c, res.drop, res.notes);
+    const rt = res.hit;
     Object.assign(c, { outIface: rt.iface, nextHop: rt.nextHop, lookupMark: p.routingMark, internet: rt.internet });
-    const notes = [`Matched ${rt.desc}.`];
+    const notes = [...res.notes, `Matched ${rt.desc}.`];
     if (!p.src) {
       p.src = this.prefSrc(rt.iface, rt.nextHop) ?? "0.0.0.0";
       notes.push(`Source address chosen: ${p.src} (address on ${rt.iface}).`);
@@ -740,10 +794,10 @@ class Sim {
       () => this.chain("filter", "output", p, c, "Filter output"),
       () => {
         if (p.routingMark === c.lookupMark) return stage("Routing adjustment", "routing mark unchanged");
-        const r2 = this.lookup(p.dst, p.routingMark);
-        if (!r2) return stage("Routing adjustment", `no route in table "${p.routingMark}"`, "drop");
-        Object.assign(c, { outIface: r2.iface, nextHop: r2.nextHop });
-        return stage("Routing adjustment", `re-routed by routing-mark: ${r2.desc}`, "change");
+        const r2 = this.route(p, c);
+        if ("drop" in r2) return stage("Routing adjustment", r2.drop, "drop");
+        Object.assign(c, { outIface: r2.hit.iface, nextHop: r2.hit.nextHop, internet: r2.hit.internet });
+        return stage("Routing adjustment", `re-routed by routing-mark: ${r2.hit.desc}`, "change");
       },
     ]);
     this.postrouting("r_post", p, c);

@@ -2,7 +2,7 @@
 
 import { useSim } from "@/lib/store";
 import { isIp, validPrefix } from "@/lib/sim/ip";
-import type { Address, AddrListEntry, BridgeHost, Iface, IfaceList, IfaceType, IpsecPolicy, QueueTree, Route, SimpleQueue } from "@/lib/sim/types";
+import type { Address, AddrListEntry, BridgeHost, Iface, IfaceList, IfaceType, IpsecPolicy, QueueTree, Route, RoutingRule, RoutingRuleAction, SimpleQueue } from "@/lib/sim/types";
 import { RowsEditor, Toggle, type ColDef } from "../ui/form";
 
 const IFACE_TYPES: IfaceType[] = ["ether", "bridge", "vlan", "gre", "ipip", "eoip"];
@@ -14,7 +14,7 @@ export function useNames() {
   const bridges = cfg.interfaces.filter((i) => i.type === "bridge").map((i) => i.name);
   const lists = cfg.interfaceLists.map((l) => l.name);
   const addrLists = [...new Set(cfg.addressLists.map((a) => a.list))];
-  const tables = [...new Set(["main", ...cfg.routes.map((r) => r.table)])];
+  const tables = [...new Set(["main", ...cfg.routes.map((r) => r.table), ...(cfg.routingRules ?? []).map((r) => r.table)])].filter(Boolean);
   return { ifaces, bridges, lists, addrLists, tables };
 }
 
@@ -90,6 +90,49 @@ export function RoutesEditor() {
         newRow={() => ({ dst: "0.0.0.0/0", gateway: "", distance: 1, table: "main" })}
         title={(r) => <><b className="mono">{r.dst}</b> <span className="muted">via {r.gateway || "?"} · {r.table}</span></>}
         addLabel="Route"
+      />
+    </>
+  );
+}
+
+const RR_ACTIONS: RoutingRuleAction[] = ["lookup", "lookup-only-in-table", "drop", "unreachable"];
+// stable fallback: a fresh [] in the selector would re-render forever
+const NO_RULES: RoutingRule[] = [];
+
+export function RoutingRulesEditor() {
+  const rows = useSim((s) => s.cfg.routingRules ?? NO_RULES);
+  const setCfg = useSim((s) => s.setCfg);
+  const { ifaces, tables } = useNames();
+  const lookup = (r: RoutingRule) => r.action.startsWith("lookup");
+  const cols: ColDef<RoutingRule>[] = [
+    { key: "srcAddress", label: "Src. address", validate: ipOrPrefix, mono: true, placeholder: "any" },
+    { key: "dstAddress", label: "Dst. address", validate: ipOrPrefix, mono: true, placeholder: "any" },
+    { key: "routingMark", label: "Routing mark", suggestions: tables, placeholder: "any" },
+    { key: "interface", label: "In-interface", options: ["", ...ifaces] },
+    { key: "action", label: "Action", options: RR_ACTIONS },
+    { key: "table", label: "Table", suggestions: tables, show: lookup },
+    { key: "comment", label: "Comment", wide: true },
+  ];
+  return (
+    <>
+      <p className="muted small">
+        <code>/routing rule</code>: checked top to bottom before the normal lookup. The first matching rule decides. <b>lookup</b> tries the next rule when its
+        table has no route; <b>lookup-only-in-table</b> doesn&apos;t. Without a matching rule, the routing mark&apos;s table is used, then main.
+      </p>
+      <RowsEditor
+        rows={rows}
+        cols={cols}
+        reorder
+        onChange={(v) => setCfg((c) => void (c.routingRules = v))}
+        newRow={(): RoutingRule => ({ srcAddress: "192.168.88.0/24", action: "lookup", table: tables.find((t) => t !== "main") ?? "main" })}
+        title={(r, i) => (
+          <>
+            <b>#{i}</b> <span className="mono">{[r.srcAddress && `from ${r.srcAddress}`, r.dstAddress && `to ${r.dstAddress}`, r.routingMark && `mark ${r.routingMark}`, r.interface && `in ${r.interface}`].filter(Boolean).join(" · ") || "any"}</span>{" "}
+            <span className="muted">→ {r.action}{lookup(r) ? ` ${r.table}` : ""}</span>
+          </>
+        )}
+        addLabel="Routing rule"
+        empty="No routing rules: every packet uses its routing mark's table, then main."
       />
     </>
   );

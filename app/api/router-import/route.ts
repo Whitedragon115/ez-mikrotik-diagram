@@ -23,6 +23,7 @@ const ENDPOINTS: Record<string, string> = {
   "interface/list/member": "/interface list member",
   "ip/address": "/ip address",
   "ip/route": "/ip route",
+  "routing/rule": "/routing rule",
   "ip/firewall/filter": "/ip firewall filter",
   "ip/firewall/nat": "/ip firewall nat",
   "ip/firewall/mangle": "/ip firewall mangle",

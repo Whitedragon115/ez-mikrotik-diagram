@@ -9,7 +9,7 @@ import { Field, Section } from "../ui/form";
 import { Select } from "../ui/Select";
 import { PortForwardWizard, TemplatePackets, TemplatePicker } from "./Setups";
 import {
-  AddressListEditor, AddressesEditor, BridgeHostsEditor, BridgeSettings, InterfacesEditor, IpsecEditor, ListsEditor, QueuesEditor, RoutesEditor,
+  AddressListEditor, AddressesEditor, BridgeHostsEditor, BridgeSettings, InterfacesEditor, IpsecEditor, ListsEditor, QueuesEditor, RoutesEditor, RoutingRulesEditor,
 } from "./editors";
 
 const PROTOS: Proto[] = ["tcp", "udp", "icmp", "gre", "esp"];
@@ -105,6 +105,7 @@ function RouterTab() {
       <Section title="Interfaces" count={cfg.interfaces.length}><InterfacesEditor /></Section>
       <Section title="IP addresses" count={cfg.addresses.length}><AddressesEditor /></Section>
       <Section title="Routes" count={cfg.routes.length}><RoutesEditor /></Section>
+      <Section title="Routing rules" count={(cfg.routingRules ?? []).length}><RoutingRulesEditor /></Section>
       <Section title="Interface lists" count={cfg.interfaceLists.length}><ListsEditor /></Section>
       <Section title="Address lists" count={cfg.addressLists.length}><AddressListEditor /></Section>
       <Section title="Bridge" count={cfg.bridgeHosts.length}>

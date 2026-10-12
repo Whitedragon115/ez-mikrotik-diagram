@@ -109,7 +109,7 @@ export function nodeCount(cfg: RouterConfig, id: string): number {
     case "rules":
       return e.tabs.reduce((n, t) => n + cfg.rules[t.table].filter((r) => r.chain === t.chain && !r.disabled).length, 0);
     case "routes":
-      return cfg.routes.filter((r) => !r.disabled).length;
+      return cfg.routes.filter((r) => !r.disabled).length + (cfg.routingRules ?? []).filter((r) => !r.disabled).length;
     case "ipsec":
       return cfg.ipsecPolicies.filter((p) => !p.disabled).length;
     case "bridgeHosts":
@@ -148,9 +148,11 @@ export function toScript(cfg: RouterConfig): string {
   sec("/interface list", cfg.interfaceLists.map((l) => `add name=${q(l.name)}`));
   sec("/interface list member", cfg.interfaceLists.flatMap((l) => l.members.split(",").filter(Boolean).map((m) => `add list=${q(l.name)} interface=${q(m.trim())}`)));
   sec("/ip address", cfg.addresses.map((a) => `add ${kv({ address: a.address, interface: a.interface, disabled: a.disabled })}`));
-  const tables = [...new Set(cfg.routes.map((r) => r.table).filter((t) => t !== "main"))];
+  const rrules = cfg.routingRules ?? [];
+  const tables = [...new Set([...cfg.routes.map((r) => r.table), ...rrules.filter((r) => r.action.startsWith("lookup")).map((r) => r.table)].filter((t) => t && t !== "main"))];
   sec("/routing table", tables.map((t) => `add name=${q(t)} fib`));
   sec("/ip route", cfg.routes.map((r) => `add ${kv({ "dst-address": r.dst, gateway: r.gateway, distance: r.distance, "routing-table": r.table === "main" ? undefined : r.table, comment: r.comment, disabled: r.disabled })}`));
+  sec("/routing rule", rrules.map((r) => `add ${kv({ "src-address": r.srcAddress, "dst-address": r.dstAddress, "routing-mark": r.routingMark, interface: r.interface, action: r.action, table: r.action.startsWith("lookup") ? r.table : undefined, comment: r.comment, disabled: r.disabled })}`));
   sec("/ip firewall address-list", cfg.addressLists.map((a) => `add list=${q(a.list)} address=${a.address}`));
   const menus: [string, keyof RouterConfig["rules"]][] = [
     ["/ip firewall raw", "raw"], ["/ip firewall mangle", "mangle"], ["/ip firewall nat", "nat"], ["/ip firewall filter", "filter"],
