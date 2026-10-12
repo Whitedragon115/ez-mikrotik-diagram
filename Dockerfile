@@ -7,6 +7,10 @@ ENV PNPM_HOME=/pnpm \
     NEXT_TELEMETRY_DISABLED=1 \
     DATABASE_URL=file:/app/data/app.db
 RUN npm install -g pnpm@11.17.0
+# Prisma (generate in the build stage) needs OpenSSL, which the slim image lacks
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends openssl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
 # ---------- dependencies (includes native better-sqlite3) ----------
