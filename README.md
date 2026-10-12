@@ -1,5 +1,14 @@
 # RouterOS Packet Flow Simulator
 
+> ## ⚠️ AI awareness: please read
+>
+> **This project is fully "vibe coded". Almost all of the code was written by an AI, and it has _not_ been reviewed, audited or thoroughly tested by a human.**
+>
+> - **Do not trust the results blindly.** The simulator can be wrong: a rule may match when it shouldn't, a hook may be skipped, NAT or routing may behave differently from a real RouterOS. Always verify against your real router before you act on anything you see here.
+> - **Never run the exported `.rsc` on a production router** without reading every line yourself.
+> - **Don't store anything sensitive here.** Saved configs live in a database on this server, behind unaudited code. Router configs often contain secrets (IPsec keys, passwords, public addresses). Encrypt before saving, or better, don't save at all and use **Export** instead.
+> - Bugs, data loss and security holes are all possible. Use it at your own risk.
+
 An interactive MikroTik RouterOS packet-flow simulator. Configure a router (interfaces, bridges, addresses,
 routes, firewall/NAT/mangle/raw rules, tunnels, IPsec, queues), send a test packet, and watch it travel through
 every hook of the packet-flow diagram with each rule's match result.
@@ -44,6 +53,8 @@ rename and delete. The API:
 | `GET` | `/api/configs/:id` | full config |
 | `PUT` | `/api/configs/:id` | rename and/or overwrite |
 | `DELETE` | `/api/configs/:id` | delete |
+
+Saving requires **Discord login**. Because this project is unaudited AI-written code, **don't save anything sensitive**. When you save, you can tick **Encrypt before saving**: the setup is encrypted in your browser with a passphrase (PBKDF2-SHA-256 → AES-256-GCM) and the server only stores ciphertext. The passphrase is never sent and **cannot be recovered**. The name and description stay readable, and the encryption code is itself unreviewed, so treat it as a convenience, not a guarantee.
 
 Saving requires **Discord login**. Each saved config belongs to the Discord account that saved it, and the API
 only returns your own (other users get 404). Everything else, including simulating, importing and exporting,

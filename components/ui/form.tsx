@@ -11,7 +11,7 @@ interface FieldProps {
   options?: string[];
   suggestions?: string[];
   invalid?: boolean;
-  type?: "text" | "number";
+  type?: "text" | "number" | "password";
   disabled?: boolean;
   mono?: boolean;
   wide?: boolean;

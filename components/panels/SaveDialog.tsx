@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useSim } from "@/lib/store";
 import type { SavedSummary } from "@/lib/configs-api";
 import type { PacketInput, RouterConfig } from "@/lib/sim/types";
-import { Field } from "../ui/form";
+import { Field, Toggle } from "../ui/form";
+import { decryptJson, encryptJson, ENCRYPTED_IDENTITY, isEncryptedEnvelope, MIN_PASSPHRASE, type EncryptedEnvelope } from "@/lib/crypto";
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, { ...init, headers: { "Content-Type": "application/json", ...init?.headers } });
@@ -55,6 +56,11 @@ export default function SaveDialog() {
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const loginResult = useSim((s) => s.loginResult);
+  const [encrypt, setEncrypt] = useState(false);
+  const [pass, setPass] = useState("");
+  const [pass2, setPass2] = useState("");
+  const [unlock, setUnlock] = useState<{ id: string; name: string; env: EncryptedEnvelope } | null>(null);
+  const [unlockPass, setUnlockPass] = useState("");
 
   const refresh = useCallback(async () => {
     const who = await api<Me>("/api/auth/me").catch(() => ({ configured: false, missing: [], user: null }) as Me);
@@ -89,6 +95,14 @@ export default function SaveDialog() {
     const s = useSim.getState();
     return { config: s.cfg, packet: s.packet };
   };
+  /** What to send to the server: plain, or encrypted in the browser when "Encrypt before saving" is on. */
+  const payload = async () => {
+    const plain = current();
+    if (!encrypt) return plain;
+    if (pass.length < MIN_PASSPHRASE) throw new Error(`Use a passphrase of at least ${MIN_PASSPHRASE} characters.`);
+    if (pass !== pass2) throw new Error("The two passphrases don't match.");
+    return { config: await encryptJson(plain, pass), packet: null };
+  };
   const run = async (key: string, fn: () => Promise<string>) => {
     setBusy(key);
     setMsg(null);
@@ -104,23 +118,41 @@ export default function SaveDialog() {
 
   const saveNew = () =>
     run("new", async () => {
-      const row = await api<SavedSummary>("/api/configs", { method: "POST", body: JSON.stringify({ name, description: desc || null, ...current() }) });
+      const row = await api<SavedSummary>("/api/configs", { method: "POST", body: JSON.stringify({ name, description: desc || null, ...(await payload()) }) });
       setSavedRef({ id: row.id, name: row.name });
       setDesc("");
       return `Saved as “${row.name}”.`;
     });
   const overwrite = (id: string, label: string) =>
     run(`ow-${id}`, async () => {
-      const row = await api<SavedSummary>(`/api/configs/${id}`, { method: "PUT", body: JSON.stringify(current()) });
+      // never silently turn an encrypted save into a plain one
+      if (!encrypt && list?.find((c) => c.id === id)?.identity === ENCRYPTED_IDENTITY)
+        throw new Error("This save is encrypted. Turn on “Encrypt before saving” and enter its passphrase to overwrite it.");
+      const row = await api<SavedSummary>(`/api/configs/${id}`, { method: "PUT", body: JSON.stringify(await payload()) });
       setSavedRef({ id: row.id, name: row.name });
       return `Updated “${label}”.`;
     });
   const load = (id: string) =>
     run(`ld-${id}`, async () => {
-      const row = await api<SavedSummary & { config: RouterConfig; packet: PacketInput | null }>(`/api/configs/${id}`);
+      const row = await api<SavedSummary & { config: RouterConfig | EncryptedEnvelope; packet: PacketInput | null }>(`/api/configs/${id}`);
+      if (isEncryptedEnvelope(row.config)) {
+        setUnlock({ id, name: row.name, env: row.config });
+        setUnlockPass("");
+        return `“${row.name}” is encrypted. Enter its passphrase to load it.`;
+      }
       loadSaved({ id: row.id, name: row.name }, row.config, row.packet);
       setOpen(false);
       return `Loaded “${row.name}”.`;
+    });
+  const doUnlock = () =>
+    run("unlock", async () => {
+      if (!unlock) return "";
+      const data = await decryptJson<{ config: RouterConfig; packet: PacketInput | null }>(unlock.env, unlockPass);
+      loadSaved({ id: unlock.id, name: unlock.name }, data.config, data.packet);
+      setUnlock(null);
+      setUnlockPass("");
+      setOpen(false);
+      return `Loaded “${unlock.name}”.`;
     });
   const remove = (id: string, label: string) =>
     run(`rm-${id}`, async () => {
@@ -149,6 +181,10 @@ export default function SaveDialog() {
         </div>
 
         <div className="imp-body">
+          <div className="vibe-warn" role="note">
+            <b>⚠️ Fully AI-generated (“vibe coded”) and not code-reviewed.</b> It is <b>not safe to save sensitive things here</b>: router configs
+            often contain keys, passwords and addresses. Prefer <b>Export</b> and keep the file yourself. If you do save, encrypt it first.
+          </div>
           {me === null ? (
             <p className="muted small">Checking login…</p>
           ) : !me.configured ? (
@@ -194,6 +230,21 @@ export default function SaveDialog() {
               <Field label="Name" value={name} onChange={setName} placeholder="Home router" />
               <Field label="Description (optional)" value={desc} onChange={setDesc} placeholder="after adding the port forward" />
             </div>
+            <div className="enc-box">
+              <Toggle label="Encrypt before saving" checked={encrypt} onChange={setEncrypt} hint="Encrypts the config in your browser with a passphrase (AES-256-GCM). The server only stores ciphertext." />
+              {encrypt && (
+                <>
+                  <div className="grid2">
+                    <Field label="Passphrase" type="password" value={pass} onChange={setPass} placeholder={`at least ${MIN_PASSPHRASE} characters`} />
+                    <Field label="Repeat passphrase" type="password" value={pass2} onChange={setPass2} />
+                  </div>
+                  <p className="muted small enc-hint">
+                    Done in your browser; the passphrase is never sent. <b>It cannot be recovered</b>, so if you lose it the save is gone. The name and description
+                    stay readable. The encryption code is also unreviewed AI code, so it is not a guarantee.
+                  </p>
+                </>
+              )}
+            </div>
             <div className="imp-actions">
               <span className="muted small">Includes the router config and the current test packet.</span>
               <span className="sp" />
@@ -201,6 +252,17 @@ export default function SaveDialog() {
             </div>
           </div>
 
+          {unlock && (
+            <form className="enc-box unlock" onSubmit={(e) => { e.preventDefault(); if (unlockPass) doUnlock(); }}>
+              <b>🔒 Unlock “{unlock.name}”</b>
+              <Field label="Passphrase" type="password" value={unlockPass} onChange={setUnlockPass} />
+              <div className="imp-actions">
+                <span className="sp" />
+                <button className="btn" type="button" onClick={() => { setUnlock(null); setUnlockPass(""); }}>Cancel</button>
+                <button className="btn primary" type="submit" disabled={!unlockPass || !!busy}>{busy === "unlock" ? "Decrypting…" : "Unlock & load"}</button>
+              </div>
+            </form>
+          )}
           <h4 className="subhead">Saved in the database {list && <span className="pill">{list.length}</span>}</h4>
           {list === null ? (
             <p className="muted small">Loading…</p>

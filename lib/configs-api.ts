@@ -1,6 +1,7 @@
 // Shared validation + serialization for the saved-config API.
 import type { SavedConfig } from "@/lib/generated/prisma/client";
 import { authConfig, currentUser, type SessionUser } from "@/lib/auth";
+import { ENCRYPTED_IDENTITY, isEncryptedEnvelope } from "@/lib/crypto";
 
 /** The logged-in user, or an error response (503 when login isn't set up, 401 when logged out). */
 export async function requireUser(): Promise<{ user: SessionUser } | { response: Response }> {
@@ -60,11 +61,17 @@ export async function parseBody(req: Request, partial: boolean): Promise<Parsed>
     out.description = typeof body.description === "string" ? body.description.trim().slice(0, 500) || null : null;
   }
   if (body.config !== undefined || !partial) {
-    const cfg = body.config as { interfaces?: unknown; rules?: unknown; identity?: unknown } | undefined;
-    if (!cfg || typeof cfg !== "object" || !Array.isArray(cfg.interfaces) || typeof cfg.rules !== "object")
-      return { ok: false, error: "config must be a router configuration object." };
-    out.config = JSON.stringify(cfg);
-    out.identity = typeof cfg.identity === "string" ? cfg.identity.slice(0, 100) : "MikroTik";
+    if (isEncryptedEnvelope(body.config)) {
+      // encrypted in the browser: stored as-is, the router identity stays hidden too
+      out.config = JSON.stringify(body.config);
+      out.identity = ENCRYPTED_IDENTITY;
+    } else {
+      const cfg = body.config as { interfaces?: unknown; rules?: unknown; identity?: unknown } | undefined;
+      if (!cfg || typeof cfg !== "object" || !Array.isArray(cfg.interfaces) || typeof cfg.rules !== "object")
+        return { ok: false, error: "config must be a router configuration object." };
+      out.config = JSON.stringify(cfg);
+      out.identity = typeof cfg.identity === "string" ? cfg.identity.slice(0, 100) : "MikroTik";
+    }
   }
   if (body.packet !== undefined) out.packet = body.packet === null ? null : JSON.stringify(body.packet);
   return { ok: true, data: out };

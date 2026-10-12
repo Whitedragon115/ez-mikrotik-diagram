@@ -15,4 +15,3 @@ next-env.d.ts
 Dockerfile
 docker-compose.yml
 .dockerignore
-README.md
